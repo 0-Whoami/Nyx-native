@@ -1,0 +1,77 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.termux'
+    compileSdk 35
+    ndkVersion = '27.0.12077973'
+    lintOptions {
+        abortOnError false
+    }
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        externalNativeBuild {
+            ndkBuild {
+//                cFlags '-std=c11', '-Wall', '-Wextra', '-Werror', '-Os', '-fno-stack-protector', '-Wl,--gc-sections', '-fvisibility=hidden'
+            }
+//        cmake {
+//            path file('src/main/cpp/CMakeLists.txt')
+//            version '3.22.1'
+//        }
+        }
+        applicationId "com.termux"
+        minSdk 24
+        targetSdk 28
+        versionCode 1
+        versionName "1.0"
+        resourceConfigurations += ['en', 'xhdpi']
+        splits {
+            abi {
+                enable(true)
+                reset()
+                include 'x86_64', 'armeabi-v7a'
+                universalApk false
+            }
+        }
+        versionNameSuffix '.wear'
+    }
+    externalNativeBuild {
+        ndkBuild {
+            path 'src/main/cpp/Android.mk'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles 'proguard-rules.pro'
+            debuggable false
+            jniDebuggable false
+            renderscriptDebuggable false
+            pseudoLocalesEnabled false
+            crunchPngs true
+        }
+    }
+    compileOptions {
+        coreLibraryDesugaringEnabled false
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging false
+        }
+        resources {
+            excludes += ['/META-INF/**']
+        }
+    }
+    applicationVariants.configureEach { final variant ->
+        variant.outputs.configureEach { final output ->
+            final def abi = output.getFilter('ABI')
+            outputFileName = new File('nyx_' + variant.buildType.name + '_' + (abi ? abi : 'universal') + '.apk')
+        }
+    }
+}
+
+dependencies {}
