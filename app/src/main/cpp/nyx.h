@@ -9,27 +9,16 @@
 #include <pthread.h>
 #include <sys/wait.h>
 #include <wchar.h>
-
-#define MIN(a, b)        ((a) < (b) ? (a) : (b))
-#define MAX(a, b)        ((a) < (b) ? (b) : (a))
-#define LEN(a)            (sizeof(a) / sizeof(a)[0])
-#define BETWEEN(x, a, b)    ((a) <= (x) && (x) <= (b))
-#define DIVCEIL(n, d)        (((n) + ((d) - 1)) / (d))
-#define DEFAULT(a, b)        (a) = (a) ? (a) : (b)
-#define LIMIT(x, a, b)        (x) = (x) < (a) ? (a) : (x) > (b) ? (b) : (x)
-#define MODBIT(x, set, bit)    ((set) ? ((x) |= (bit)) : ((x) &= ~(bit)))
+#include "emulator/utf.h"
 
 #define TRUECOLOR(r, g, b)    (1 << 24 | (r) << 16 | (g) << 8 | (b))
 #define IS_TRUECOL(x)        (1 << 24 & (x))
-#define UTF_SIZ 4
+
 #define MOUSE_LEFT_BUTTON  0
 #define MOUSE_WHEELUP_BUTTON  64
 #define MOUSE_WHEELDOWN_BUTTON  65
-/**
- * Used for invalid data - [...](<a href="http://en.wikipedia.org/wiki/Replacement_character#Replacement_character">...</a>)
- */
-#define UNICODE_REPLACEMENT_CHAR  0xFFFD
-/* The supported terminal cursor styles. */
+
+/* The supported terminal term_cursor styles. */
 #define TERMINAL_CURSOR_STYLE_BLOCK  0
 #define TERMINAL_CURSOR_STYLE_UNDERLINE  1
 #define TERMINAL_CURSOR_STYLE_BAR  2
@@ -42,7 +31,7 @@
  */
 #define ESC_NONE  0
 /**
- * Escape processing: Have seen an ESC character - proceed to [.doEsc]
+ * Escape processing: Have seen an ESC character - proceed to [.do_esc]
  */
 #define ESC 1
 /**
@@ -118,27 +107,27 @@
  */
 #define MAX_OSC_STRING_LENGTH  8192
 /**
- * DECSET 1 - application cursor keys.
+ * DECSET 1 - application term_cursor keys.
  */
 #define DECSET_BIT_APPLICATION_CURSOR_KEYS  1
 #define DECSET_BIT_REVERSE_VIDEO  1 << 1
 /**
- * [...](<a href="http://www.vt100.net/docs/vt510-rm/DECOM">...</a>): "When DECOM is set, the home cursor position is at the upper-left
+ * [...](<a href="http://www.vt100.net/docs/vt510-rm/DECOM">...</a>): "When DECOM is set, the home term_cursor position is at the upper-left
  * corner of the console, within the margins. The starting point for line numbers depends on the current top margin
- * setting. The cursor cannot move outside of the margins. When DECOM is reset, the home cursor position is at the
- * upper-left corner of the console. The starting point for line numbers is independent of the margins. The cursor
+ * setting. The term_cursor cannot move outside of the margins. When DECOM is reset_color, the home term_cursor position is at the
+ * upper-left corner of the console. The starting point for line numbers is independent of the margins. The term_cursor
  * can move outside of the margins."
  */
 #define DECSET_BIT_ORIGIN_MODE  1 << 2
 /**
  * [...](<a href="http://www.vt100.net/docs/vt510-rm/DECAWM">...</a>): "If the DECAWM function is set, then graphic characters received when
- * the cursor is at the right border of the page appear at the beginning of the next line. Any text on the page
- * scrolls up if the cursor is at the end of the scrolling region. If the DECAWM function is reset, then graphic
- * characters received when the cursor is at the right border of the page replace characters already on the page."
+ * the term_cursor is at the right border of the page appear at the beginning of the next line. Any text on the page
+ * scrolls up if the term_cursor is at the end of the scrolling region. If the DECAWM function is reset_color, then graphic
+ * characters received when the term_cursor is at the right border of the page replace characters already on the page."
  */
 #define DECSET_BIT_AUTOWRAP  1 << 3
 /**
- * DECSET 25 - if the cursor should be enabled, [.isCursorEnabled].
+ * DECSET 25 - if the term_cursor should be enabled, [.isCursorEnabled].
  */
 #define DECSET_BIT_CURSOR_ENABLED  1 << 4
 #define DECSET_BIT_APPLICATION_KEYPAD  1 << 5
@@ -171,100 +160,7 @@
  */
 #define DECSET_BIT_RECTANGULAR_CHANGEATTRIBUTE  1 << 12
 
-static inline void size(int fd, unsigned short row, unsigned short col) {
-    const struct winsize sz = {.ws_row=row, .ws_col=col};
-    ioctl(fd, TIOCSWINSZ, &sz);
-}
 
-static int
-get_process_fd(char const *cmd, int *pProcessId, unsigned short rows, unsigned short columns) {
-    int ptm = open("/dev/ptmx", O_RDWR | O_CLOEXEC);
-
-    char devname[64];
-    grantpt(ptm);
-    unlockpt(ptm);
-    ptsname_r(ptm, devname, sizeof(devname));
-
-    // Enable UTF-8 mode and disable flow control to prevent Ctrl+S from locking up the display.
-    struct termios tios;
-    tcgetattr(ptm, &tios);
-    tios.c_iflag |= IUTF8;
-    tios.c_iflag &= ~(IXON | IXOFF);
-    tcsetattr(ptm, TCSANOW, &tios);
-
-    /** Set initial winsize. */
-    size(ptm, rows, columns);
-
-    pid_t pid = fork();
-    if (pid > 0) {
-        *pProcessId = (int) pid;
-        return ptm;
-    } else {
-        // Clear signals which the Android java process may have blocked:
-        sigset_t signals_to_unblock;
-        sigfillset(&signals_to_unblock);
-        sigprocmask(SIG_UNBLOCK, &signals_to_unblock, 0);
-
-        close(ptm);
-        setsid();
-
-        int pts = open(devname, O_RDWR);
-        if (pts < 0) exit(-1);
-
-        dup2(pts, 0);
-        dup2(pts, 1);
-        dup2(pts, 2);
-
-        DIR *self_dir = opendir("/proc/self/fd");
-        if (self_dir != NULL) {
-            int self_dir_fd = dirfd(self_dir);
-            struct dirent *entry;
-            while ((entry = readdir(self_dir)) != NULL) {
-                int fd = atoi(entry->d_name);
-                if (fd > 2 && fd != self_dir_fd) close(fd);
-            }
-            closedir(self_dir);
-        }
-
-        putenv("HOME=/data/data/com.termux/files/home");
-        putenv("PWD=/data/data/com.termux/files/home");
-        putenv("LANG=en_US.UTF-8");
-        putenv("PREFIX=/data/data/com.termux/files/usr");
-        putenv("PATH=/data/data/com.termux/files/usr/bin");
-        putenv("TMPDIR=/data/data/com.termux/files/usr/tmp");
-        putenv("COLORTERM=truecolor");
-        putenv("TERM=xterm-256color");
-
-        chdir("/data/data/com.termux/files/home/");
-        execvp(cmd, NULL);
-        _exit(1);
-    }
-}
-
-#define CHARACTER_ATTRIBUTE_BOLD               (1 << 0)
-#define CHARACTER_ATTRIBUTE_ITALIC             (1 << 1)
-#define CHARACTER_ATTRIBUTE_UNDERLINE          (1 << 2)
-#define CHARACTER_ATTRIBUTE_BLINK              (1 << 3)
-#define CHARACTER_ATTRIBUTE_INVERSE            (1 << 4)
-#define CHARACTER_ATTRIBUTE_INVISIBLE          (1 << 5)
-#define CHARACTER_ATTRIBUTE_STRIKETHROUGH      (1 << 6)
-#define CHARACTER_ATTRIBUTE_PROTECTED          (1 << 7)
-#define CHARACTER_ATTRIBUTE_DIM                (1 << 8)
-#define CHARACTER_ATTRIBUTE_WARP               (1 << 9)
-#define CHARACTER_ATTRIBUTE_WIDE               (1 << 10)
-
-#define COLOR_INDEX_FOREGROUND  256
-#define COLOR_INDEX_BACKGROUND 257
-#define COLOR_INDEX_CURSOR  258
-#define NUM_INDEXED_COLORS  259
-
-
-typedef struct {
-    uint_fast32_t c/*Character*/, fg, bg;
-    unsigned short mode;
-} Glyph;
-
-typedef Glyph *Row;
 
 typedef struct {
     int x, y, old_x, old_y, flags;
@@ -280,17 +176,15 @@ typedef struct {
     size_t len;
 } OSC;
 
-#define MODE_UTF8 1<<0
-#define MODE_INSERT 1<<1
-#define MODE_ALT 1<<2
-#define MODE_LINE_DRAWING 1<<3
-typedef struct {
-    Row *lines;
-    int top;
-} TermBuffer;
+#define MODE_UTF8 0b0001
+#define MODE_INSERT 0b0010
+#define MODE_ALT 0b0100
+#define MODE_LINE_DRAWING 0b1000
+
+#define TRANSCRIPT 500
 typedef struct {
     int fd, pid;
-    unsigned short row, col;
+   uint_fast16_t row, col;
     int topMargin, bottomMargin, leftMargin, rightMargin;
     TermBuffer *screen, mainBuf, altBuf;
     Cursor cursor;
@@ -302,70 +196,9 @@ typedef struct {
     uint_fast32_t lastEmittedCodepoint;
 } Term;
 
-static const unsigned char utfMask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
-static const unsigned char utfByte[UTF_SIZ + 1] = {0x80, 0, 0xC0, 0xE0, 0xF0};
-static const uint_fast32_t utfMin[UTF_SIZ + 1] = {0, 0, 0x80, 0x800, 0x10000};
-static const uint_fast32_t utfMax[UTF_SIZ + 1] = {0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
-
-static inline uint_fast32_t utf8Byte(const unsigned char c, size_t *const i) {
-    for (*i = 0; *i < sizeof(utfMask); ++*i) {
-        if ((c & utfMask[*i]) == utfByte[*i]) return c & ~utfMask[*i];
-    }
-    return 0;
-}
-
-static inline size_t utf8validate(uint_fast32_t *const u, size_t i) {
-    if (!BETWEEN(*u, utfMin[i], utfMax[i]) || BETWEEN(*u, 0xD800, 0xDFFF))
-        *u = UNICODE_REPLACEMENT_CHAR;
-    for (i = 1; *u > utfMax[i]; ++i);
-
-    return i;
-}
-
-size_t utf_decode(const char *b, uint_fast32_t *const c, const size_t _len) {
-    size_t i, j, len, type;
-    uint_fast32_t unDecoded;
-
-    *c = UNICODE_REPLACEMENT_CHAR;
-    if (!_len)
-        return 0;
-    unDecoded = utf8Byte(b[0], &len);
-    if (!BETWEEN(len, 1, UTF_SIZ))
-        return 1;
-    for (i = 1, j = 1; i < _len && j < len; ++i, ++j) {
-        unDecoded = (unDecoded << 6) | utf8Byte(b[i], &type);
-        if (type != 0)
-            return j;
-    }
-    if (j < len)
-        return 0;
-    *c = unDecoded;
-    utf8validate(c, len);
-    return len;
-}
-
 #define isDecsetInternalBitSet(term, bit) (term->cursor.flags & bit)
 
-static void
-blockCopy(TermBuffer *buffer, const int sx, const int sy, int w, const int h, const int dx,
-          const int dy) {
-    if (w == 0) return;
-    const bool copyingUp = sy > dy;
-    for (int y = 0; y < h; y++) {
-        const int y2 = buffer->top + (copyingUp ? y : h - y - 1);
-        Glyph *src = buffer->lines[dy + y2] + dx, *dst =
-                buffer->lines[sy + y2] + sx; //TODO CHECK IF NULL
-        while (--w)
-            *src++ = *dst++;
-    }
-}
 
-static void blockSet(TermBuffer *buffer, const int sx, const int sy, const int w, const int h,
-                     const Glyph glyph) {
-    for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++)
-            buffer->lines[buffer->top + sy + y][sx + x] = glyph;//TODO CHECK NULL
-}
 
 void scrollDownOneLine(TermBuffer *buffer) {
     buffer->top++;
@@ -374,7 +207,7 @@ void scrollDownOneLine(TermBuffer *buffer) {
 void scrollDown(Term *term) {
     if (term->leftMargin != 0 || term->rightMargin != term->col) {
         const int w = term->rightMargin - term->leftMargin;
-        term->cursor.attr.c = ' ';        //TODO INITIALIZE THIS AT BEGINNING
+        term->cursor.attr.cursor = ' ';        //TODO INITIALIZE THIS AT BEGINNING
         blockCopy(term->screen, term->leftMargin, term->topMargin + 1, w,
                   term->bottomMargin - term->topMargin - 1, term->leftMargin, term->topMargin);
         blockSet(term->screen, term->leftMargin, term->bottomMargin - 1, w, 1, term->cursor.attr);
@@ -501,7 +334,7 @@ static void emitCodePoint(Term *term, uint_fast32_t codePoint) {
     if (cursorInLastColumn) {
         if (autoWarp) {
             if ((term->aboutToAutowrap && width == 1) || 2 == width) {
-                term->screen->lines[term->cursor.y][term->cursor.x].mode |= CHARACTER_ATTRIBUTE_WARP;
+                term->screen->lines[term->cursor.y][term->cursor.x].effect |= CHARACTER_ATTRIBUTE_WARP;
                 term->cursor.x = term->leftMargin;
                 if (term->cursor.y + 1 < term->bottomMargin) term->cursor.y++;
                 else
