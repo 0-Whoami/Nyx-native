@@ -113,12 +113,13 @@ void reset_emulator(term_emulator *emulator) {
     decset_bit.AUTOWRAP = true;
     decset_bit.CURSOR_ENABLED = true;
     emulator->saved_state = emulator->saved_state_alt = (term_cursor) {0, 0, COLOR_INDEX_FOREGROUND, COLOR_INDEX_BACKGROUND, {0},
-                                                                       emulator->cursor.decsetBit, emulator->cursor.mode};
+                                                                       emulator->cursor.decsetBit,
+                                                                       emulator->cursor.mode};//TODO fix me by setting individually line drawing should stay same
     reset_all_color(emulator->colors);
 }
 
 
-void doOscSetTextParameters(term_emulator *emulator, const char *const terminator) {
+void do_osc_set_text_parameters(term_emulator *emulator, const char *const terminator) {
     char value = 0;
     char *text_param;
     for (int osc_index = 0; osc_index < emulator->osc.len; osc_index++) {
@@ -667,28 +668,37 @@ inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
         case '@': {
             about_to_autowrap = false;
             const u_char columns_after_cursor = COLUMNS - cursor_col;
-            const u_char spaces_to_insert = MIN(getArg(emulator, 0, 1, true), columns_after_cursor);
+            char arg = getArg(emulator, 0, 1, true);
+            const u_char spaces_to_insert = MIN(arg, columns_after_cursor);
             const u_char chars_to_move = columns_after_cursor - spaces_to_insert;
             blockCopy(emulator->screen, cursor_col, cursor_row, chars_to_move, 1, cursor_col + spaces_to_insert, cursor_row);
             block_clear(cursor_col, cursor_row, spaces_to_insert, 1);
         }
             break;
-        case 'A':
-            cursor_row = MAX(0, cursor_row - getArg(emulator, 0, 1, 1));
+        case 'A': {
+            short row = cursor_row - getArg(emulator, 0, 1, 1);
+            cursor_row = MAX(0, row);
             about_to_autowrap = false;
+        }
             break;
-        case 'B':
-            cursor_row = MIN(ROWS - 1, cursor_row + getArg(emulator, 0, 1, 1));
+        case 'B': {
+            short row = cursor_row + getArg(emulator, 0, 1, 1);
+            cursor_row = MIN(ROWS - 1, row);
             about_to_autowrap = false;
+        }
             break;
         case 'C':
-        case 'a':
-            cursor_col = MIN(right_margin - 1, cursor_col + getArg(emulator, 0, 1, 1));
+        case 'a': {
+            char col = cursor_col + getArg(emulator, 0, 1, 1);
+            cursor_col = MIN(right_margin - 1, col);
             about_to_autowrap = false;
+        }
             break;
-        case 'D':
-            cursor_col = MAX(left_margin, cursor_col - getArg(emulator, 0, 1, 1));
+        case 'D': {
+            char col = cursor_col - getArg(emulator, 0, 1, 1);
+            cursor_col = MAX(left_margin, col);
             about_to_autowrap = false;
+        }
             break;
         case 'E':
             set_cursor_position_origin_mode(emulator, 0, cursor_row + getArg(emulator, 0, 1, 1));
@@ -696,9 +706,11 @@ inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
         case 'F':
             set_cursor_position_origin_mode(emulator, 0, cursor_row - getArg(emulator, 0, 1, 1));
             break;
-        case 'G':
-            cursor_col = LIMIT(getArg(emulator, 0, 1, 1), 1, COLUMNS);
+        case 'G': {
+            char arg = emulator->csi.arg[0];
+            cursor_col = LIMIT(arg, 1, COLUMNS);
             about_to_autowrap = false;
+        }
             break;
         case 'H':
         case 'f':
@@ -928,12 +940,39 @@ inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
     }
 }
 
-void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) {
+#define osc_arg emulator->osc.args
+
+inline void do_device_control(term_emulator *emulator, uint_fast32_t codepoint) {
+    if ('\\' == codepoint) {
+        if (strncmp(osc_arg, "$q", 2) == 0) {
+            if (strncmp("$q\"p", osc_arg, 4) == 0) write(emulator->fd, "\033P1$r64;1\"p\033\\", 13);
+            else
+                finishSequence;
+        } else if (strncmp(osc_arg, "+q", 2) == 0) {
+
+        }
+    } else {
+        if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
+            free(emulator->osc.args);
+            emulator->osc.len = 0;
+            finishSequence;
+        } else {
+            char s[4];
+            char len = codepoint_to_utf8(codepoint, s);
+            emulator->osc.args = realloc(emulator->osc.args, emulator->osc.len + len);
+            memcpy(emulator->osc.args + emulator->osc.len, s, len);
+            emulator->osc.len += len;
+            continue_sequence(esc_state)
+        }
+    }
+}
+
+inline void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) {
     switch (codepoint) {
         case 0:
             break;
         case 7:
-            if (esc_state == ESC_OSC) doOscSetTextParameters(emulator, "\007");
+            if (esc_state == ESC_OSC) do_osc_set_text_parameters(emulator, "\007");
             break;
         case 8:
             if (left_margin == cursor_col) {
@@ -1080,65 +1119,78 @@ void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) {
                         case 'r':
                         case 't': {
                             const bool reverse = 't' == codepoint;
-                            short arg0 = getArg(emulator, 0, 1, 1) - 1, arg1 = getArg(emulator, 1, 1, 1) - 1, arg2 =
-                                    getArg(emulator, 2, ROWS, 1) + 1, arg3 = getArg(emulator, 3, COLUMNS, 1) + 1;
-                            short top = MIN(arg0, effective_bottom_margin) + effective_top_margin, left =
-                                    MIN(arg1, effective_right_margin) + effective_left_margin, bottom =
-                                    MIN(arg2, effective_bottom_margin - 1) + effective_top_margin, right =
-                                    MIN(arg3, effective_right_margin - 1) + effective_left_margin;
+
+                            short top, left, bottom, right;
+                            {
+                                short arg0 = getArg(emulator, 0, 1, 1) - 1, arg1 = getArg(emulator, 1, 1, 1) - 1, arg2 =
+                                        getArg(emulator, 2, ROWS, 1) + 1, arg3 = getArg(emulator, 3, COLUMNS, 1) + 1;
+                                top = MIN(arg0, effective_bottom_margin) + effective_top_margin;
+                                left = MIN(arg1, effective_right_margin) + effective_left_margin;
+                                bottom = MIN(arg2, effective_bottom_margin - 1) + effective_top_margin;
+                                right = MIN(arg3, effective_right_margin - 1) + effective_left_margin;
+                            }
                             if (4 <= emulator->csi.index) {
                                 if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS)
                                     emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
+                                bool set_or_clear;
+                                text_effect arg_effect = {0};
+                                short arg;
                                 for (char i = 4; i < emulator->csi.index; i++) {
-                                    bool set_or_clear = true;
-                                    text_effect effect;
-                                    short arg = emulator->csi.arg[i];
+                                    set_or_clear = true;
+                                    arg = emulator->csi.arg[i];
                                     switch (arg) {
                                         case 0:
                                             if (!reverse)set_or_clear = false;
-                                            effect.BOLD = effect.UNDERLINE = effect.BLINK = effect.INVERSE = 1;
+                                            arg_effect.BOLD = arg_effect.UNDERLINE = arg_effect.BLINK = arg_effect.INVERSE = 1;
                                             break;
                                         case 1:
-                                            effect.BOLD = 1;
+                                            arg_effect.BOLD = 1;
                                             break;
                                         case 4:
-                                            effect.UNDERLINE = 1;
+                                            arg_effect.UNDERLINE = 1;
                                             break;
                                         case 5:
-                                            effect.BLINK = 1;
+                                            arg_effect.BLINK = 1;
                                             break;
                                         case 7:
-                                            effect.INVERSE = 1;
+                                            arg_effect.INVERSE = 1;
                                             break;
                                         case 22:
                                             set_or_clear = false;
-                                            effect.BOLD = 1;
+                                            arg_effect.BOLD = 1;
                                             break;
                                         case 24:
                                             set_or_clear = false;
-                                            effect.UNDERLINE = 1;
+                                            arg_effect.UNDERLINE = 1;
                                             break;
                                         case 25:
                                             set_or_clear = false;
-                                            effect.BLINK = 1;
+                                            arg_effect.BLINK = 1;
                                             break;
                                         case 27:
                                             set_or_clear = false;
-                                            effect.INVERSE = 1;
+                                            arg_effect.INVERSE = 1;
                                             break;
                                         default:
-                                            effect = (text_effect) {0};
+                                            arg_effect = (text_effect) {0};
                                             break;
                                     }
+
                                     if (!reverse || set_or_clear) {
+                                        u_short bits = *((u_short *) &arg_effect);
+                                        term_row line;
+                                        u_short *effect;
                                         for (int y = top; y < bottom; y++) {
-                                            const term_row line = emulator->screen->lines[(emulator->screen->first_row + y) %
-                                                                                          emulator->screen->total_rows];
+                                            line = emulator->screen->lines[(emulator->screen->first_row + y) % emulator->screen->total_rows];
                                             short x = decset_bit.RECTANGULAR_CHANGEATTRIBUTE || y == top ? left : effective_left_margin;
                                             const short end_of_line =
                                                     decset_bit.RECTANGULAR_CHANGEATTRIBUTE || y + 1 == bottom ? right : effective_right_margin;
                                             for (; x < end_of_line; x++) {
-                                                
+                                                effect = (u_short *) &line.text[x].style.effect;
+                                                if (reverse)
+                                                    *effect = (*effect & ~bits) || (bits & ~*effect);
+
+
                                             }
                                         }
                                     }
@@ -1152,6 +1204,86 @@ void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) {
                     }
                 }
                     break;
+                case ESC_CSI_DOUBLE_QUOTE:
+                    if ('q' == codepoint) {
+                        short arg = getArg(emulator, 0, 0, 0);
+                        switch (arg) {
+                            case 0:
+                            case 2:
+                                cursor_style.effect.PROTECTED = 0;
+                                break;
+                            case 1:
+                                cursor_style.effect.PROTECTED = 1;
+                                break;
+                            default:
+                                finishSequence;
+                        }
+                    } else
+                        finishSequence;
+                    break;
+                case ESC_CSI_SINGLE_QUOTE:
+                    switch (codepoint) {
+                        case '}': {
+                            char columns_after_cursor = right_margin - cursor_col;
+                            char arg = getArg(emulator, 0, 1, 1);
+                            char columns_to_insert = MIN(arg, columns_after_cursor);
+                            char columns_to_move = columns_after_cursor - columns_to_insert;
+                            blockCopy(emulator->screen, cursor_col, 0, columns_to_move, ROWS, cursor_col, 0);
+                            block_clear(cursor_col, 0, columns_to_insert, ROWS);
+                        }
+                            break;
+                        case '~': {
+                            char columns_after_cursor = right_margin - cursor_col;
+                            char arg = getArg(emulator, 0, 1, 1);
+                            char columns_to_delete = MIN(arg, columns_after_cursor);
+                            char columns_to_move = columns_after_cursor - columns_to_delete;
+                            blockCopy(emulator->screen, cursor_col + columns_to_delete, 0, columns_to_move, ROWS, cursor_col, 0);
+                        }
+                            break;
+                        default:
+                            finishSequence;
+                            break;
+                    }
+                    break;
+                case 9:
+                    break;
+                case ESC_OSC:
+                    switch (codepoint) {
+                        case 7:
+                            do_osc_set_text_parameters(emulator, "\007");
+                            break;
+                        case 27: continue_sequence(ESC_OSC_ESC);
+                            break;
+                        default:
+                            if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
+                                char s[4];
+                                char len = codepoint_to_utf8(codepoint, s);
+                                emulator->osc.args = realloc(emulator->osc.args, emulator->osc.len + len);
+                                memcpy(emulator->osc.args + emulator->osc.len, s, len);
+                                emulator->osc.len += len;
+                                continue_sequence(esc_state)
+                            } else
+                                finishSequence;
+                            break;
+                    }
+                    break;
+                case ESC_OSC_ESC:
+                    if ('\\' == codepoint) do_osc_set_text_parameters(emulator, "\033\\");
+                    else {
+                        if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
+                            char s[5] = {27};
+                            char len = codepoint_to_utf8(codepoint, s + 1) + 1;
+                            emulator->osc.args = realloc(emulator->osc.args, emulator->osc.len + len);
+                            memcpy(emulator->osc.args + emulator->osc.len, s, len);
+                            emulator->osc.len += len;
+                            continue_sequence(esc_state)
+                        } else
+                            finishSequence;
+                    }
+                    break;
+                case ESC_P:
+                    do_device_control(emulator, codepoint);
+                    break;
             }
         }
 
@@ -1159,6 +1291,7 @@ void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) {
 }
 
 void init_term_emulator(term_emulator *emulator) {
+    *emulator = (term_emulator) {0};
     init_term_buffer(&emulator->main, transcript_row);
     init_term_buffer(&emulator->alt, ROWS);
     emulator->screen = &emulator->main;

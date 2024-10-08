@@ -92,7 +92,7 @@ void reset_all_color(unsigned int colors[NUM_INDEXED_COLORS]) {
 void parse_color_to_index(unsigned int colors[NUM_INDEXED_COLORS], int_fast16_t index, char *color_string, size_t len) {
     char skip_between = 0;
     if ('#' == color_string[0]) color_string++;
-    else if (strncmp(color_string, "rgb:", 4) != 0) {
+    else if (strncmp(color_string, "rgb:", 4) == 0) {
         color_string += 4;
         skip_between = 1;
     } else return;
