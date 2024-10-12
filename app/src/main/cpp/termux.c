@@ -2,7 +2,6 @@
 #include <android/log.h>
 #include <pthread.h>
 #include <unistd.h>
-#include "nyx.h"
 
 #define LOG(...)  __android_log_print(ANDROID_LOG_INFO, "Native", __VA_ARGS__)
 

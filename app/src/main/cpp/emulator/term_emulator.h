@@ -3,6 +3,11 @@
 #include "term_buffer.h"
 #include "term_constants.h"
 #include "term_session.h"
+#include "key_handler.h"
+
+enum CURSOR_SHAPE {
+    BLOCK = 0, UNDERLINE = 1, BAR = 2
+};
 
 typedef struct {
     u_char x;
@@ -10,10 +15,11 @@ typedef struct {
     glyph_style style;
     DECSET_BIT decsetBit;
     TERM_MODE mode;
+    u_char cursor_shape: 2;
 } term_cursor;
 
 typedef struct {
-    char *args;
+    char args[MAX_OSC_STRING_LENGTH];
     int len;
 } OSC;
 
@@ -53,36 +59,6 @@ typedef struct {
 #define term_mode emulator->cursor.mode
 #define about_to_autowrap term_mode.ABOUT_TO_AUTO_WRAP
 
-short mapDecSetBitToInternalBit(const int decsetBit) {
-    switch (decsetBit) {
-        case 1 :
-            return APPLICATION_CURSOR_KEYS;
-        case 5 :
-            return REVERSE_VIDEO;
-        case 6 :
-            return ORIGIN_MODE;
-        case 7 :
-            return AUTOWRAP;
-        case 25 :
-            return CURSOR_ENABLED;
-        case 66 :
-            return APPLICATION_KEYPAD;
-        case 69 :
-            return LEFTRIGHT_MARGIN_MODE;
-        case 1000 :
-            return MOUSE_TRACKING_PRESS_RELEASE;
-        case 1002 :
-            return MOUSE_TRACKING_BUTTON_EVENT;
-        case 1004 :
-            return SEND_FOCUS_EVENTS;
-        case 1006 :
-            return MOUSE_PROTOCOL_SGR;
-        case 2004 :
-            return BRACKETED_PASTE_MODE;
-        default:
-            return -1;
-    }
-}
 
 void sendMouseEvent(term_emulator *emulator, u_char button, const u_char x, int16_t y, const bool pressed) {
     if (!(MOUSE_LEFT_BUTTON_MOVED == button && decset_bit.MOUSE_TRACKING_BUTTON_EVENT) && decset_bit.MOUSE_PROTOCOL_SGR)
@@ -93,13 +69,12 @@ void sendMouseEvent(term_emulator *emulator, u_char button, const u_char x, int1
     }
 }
 
-void setDefaultTabStop(term_emulator *emulator) {
+void set_default_tab_stop(term_emulator *emulator) {
     for (int i = 0; i < COLUMNS; i++)
         emulator->tabStop[i] = i && 0 == (i & 7);
 }
 
-
-void reset_emulator(term_emulator *emulator) {
+static void reset_emulator(term_emulator *emulator) {
     emulator->csi.index = 0;
     esc_state = ESC_NONE;
     emulator->csi.dontContinueSequence = true;
@@ -109,17 +84,16 @@ void reset_emulator(term_emulator *emulator) {
     right_margin = COLUMNS;
     emulator->cursor.style.fg = COLOR_INDEX_FOREGROUND;
     emulator->cursor.style.bg = COLOR_INDEX_BACKGROUND;
-    setDefaultTabStop(emulator);
+    set_default_tab_stop(emulator);
     decset_bit.AUTOWRAP = true;
     decset_bit.CURSOR_ENABLED = true;
     emulator->saved_state = emulator->saved_state_alt = (term_cursor) {0, 0, COLOR_INDEX_FOREGROUND, COLOR_INDEX_BACKGROUND, {0},
                                                                        emulator->cursor.decsetBit,
-                                                                       emulator->cursor.mode};//TODO fix me by setting individually line drawing should stay same
+                                                                       emulator->cursor.mode};//TODO fix me by setting individually, line drawing should stay same
     reset_all_color(emulator->colors);
 }
 
-
-void do_osc_set_text_parameters(term_emulator *emulator, const char *const terminator) {
+static void do_osc_set_text_parameters(term_emulator *emulator, const char *const terminator) {
     char value = 0;
     char *text_param;
     for (int osc_index = 0; osc_index < emulator->osc.len; osc_index++) {
@@ -234,14 +208,14 @@ void do_osc_set_text_parameters(term_emulator *emulator, const char *const termi
     }
 }
 
-void scroll_down_one_line(term_emulator *emulator) {
+static void scroll_down_one_line(term_emulator *emulator) {
     if (0 != left_margin || right_margin != COLUMNS) {
         blockCopy(emulator->screen, left_margin, top_margin + 1, right_margin - left_margin, bottom_margin - top_margin - 1, left_margin, top_margin);
         blockSet(emulator->screen, left_margin, bottom_margin - 1, right_margin - left_margin, 1, (glyph) {' ', cursor_style});
     } else scroll_down_one_line_buff(emulator->screen, top_margin, left_margin, cursor_style);
 }
 
-void do_line_feed(term_emulator *emulator) {
+static void do_line_feed(term_emulator *emulator) {
     int16_t new_cursor_row = cursor_row + 1;
     if (cursor_row >= bottom_margin) {
         if (cursor_row != ROWS - 1) {
@@ -258,7 +232,7 @@ void do_line_feed(term_emulator *emulator) {
     }
 }
 
-void emit_codepoint(term_emulator *emulator, uint_fast32_t code_point) {
+static void emit_codepoint(term_emulator *emulator, uint_fast32_t code_point) {
     emulator->last_codepoint = code_point;
     if (term_mode.USE_G0 ? term_mode.G0 : term_mode.G1) {
         switch (code_point) {
@@ -396,24 +370,24 @@ void emit_codepoint(term_emulator *emulator, uint_fast32_t code_point) {
 
 #define clear_transcript() blockSet(&emulator->main, 0, 0, COLUMNS, transcript_row, (glyph) {' ', NORMAL})
 
-void set_cursor_position_origin_mode(term_emulator *emulator, char x, short y) {
+static void set_cursor_position_origin_mode(term_emulator *emulator, char x, short y) {
     bool origin_mode = decset_bit.ORIGIN_MODE;
     const short effective_top_margin = origin_mode ? top_margin : 0;
     const short effective_bottom_margin = origin_mode ? bottom_margin : ROWS;
     const u_char effective_left_margin = origin_mode ? left_margin : 0;
     const u_char effective_right_margin = origin_mode ? right_margin : COLUMNS;
-    cursor_col = MAX(effective_left_margin, MIN(effective_left_margin + x, effective_right_margin - 1));;
-    cursor_row = MAX(effective_top_margin, MIN(effective_top_margin + y, effective_bottom_margin - 1));;
+    cursor_col = MAX(effective_left_margin, MIN(effective_left_margin + x, effective_right_margin - 1));
+    cursor_row = MAX(effective_top_margin, MIN(effective_top_margin + y, effective_bottom_margin - 1));
     about_to_autowrap = false;
 }
 
-inline void set_cursor_row_col(term_emulator *emulator, u_char x, short y) {
+static inline void set_cursor_row_col(term_emulator *emulator, u_char x, short y) {
     cursor_row = LIMIT(y, 0, ROWS - 1);
     cursor_col = LIMIT(x, 0, COLUMNS - 1);
     about_to_autowrap = false;
 }
 
-inline void do_esc(term_emulator *emulator, uint_fast32_t codepoint) {
+static inline void do_esc(term_emulator *emulator, uint_fast32_t codepoint) {
     switch (codepoint) {
         case '#': continue_sequence(ESC_POUND)
             break;
@@ -475,7 +449,6 @@ inline void do_esc(term_emulator *emulator, uint_fast32_t codepoint) {
             break;
         case 'P':
             emulator->osc.len = 0;
-            free(emulator->osc.args);
             continue_sequence(ESC_P)
             break;
         case '[': continue_sequence(ESC_CSI)
@@ -485,7 +458,6 @@ inline void do_esc(term_emulator *emulator, uint_fast32_t codepoint) {
             break;
         case ']':
             emulator->osc.len = 0;
-            free(emulator->osc.args);
             continue_sequence(ESC_OSC)
             break;
         case '>':
@@ -497,13 +469,13 @@ inline void do_esc(term_emulator *emulator, uint_fast32_t codepoint) {
     }
 }
 
-int getArg(term_emulator *emulator, char index, short default_value, bool treat_zero_as_default) {
+static int getArg(term_emulator *emulator, char index, short default_value, bool treat_zero_as_default) {
     short result = emulator->csi.arg[index];
     if (0 > result || (0 == result && treat_zero_as_default)) result = default_value;
     return result;
 }
 
-char next_tab_stop(term_emulator *emulator, char num_tabs) {
+static char next_tab_stop(term_emulator *emulator, char num_tabs) {
     for (char i = cursor_col + 1; i < COLUMNS; i++) {
         if (emulator->tabStop[i]) {
             if (0 == --num_tabs) return MIN(i, right_margin);
@@ -512,7 +484,7 @@ char next_tab_stop(term_emulator *emulator, char num_tabs) {
     return right_margin - 1;
 }
 
-void do_set_mode(term_emulator *emulator, bool new_value) {
+static void do_set_mode(term_emulator *emulator, bool new_value) {
     const char arg = getArg(emulator, 0, 0, 1);
     switch (arg) {
         case 4:
@@ -525,7 +497,7 @@ void do_set_mode(term_emulator *emulator, bool new_value) {
     }
 }
 
-inline void select_graphic_rendition(term_emulator *emulator) {
+static inline void select_graphic_rendition(term_emulator *emulator) {
     if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS) emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
     for (char i = 0; i < emulator->csi.index; i++) {
         char code = emulator->csi.arg[i];
@@ -636,7 +608,7 @@ inline void select_graphic_rendition(term_emulator *emulator) {
     }
 }
 
-void parse_arg(term_emulator *emulator, char input_byte) {
+static void parse_arg(term_emulator *emulator, char input_byte) {
     if ('0' <= input_byte && '9' >= input_byte) {
         if (emulator->csi.index < MAX_ESCAPE_PARAMETERS) {
             short *old_value = emulator->csi.arg + emulator->csi.index;
@@ -653,7 +625,7 @@ void parse_arg(term_emulator *emulator, char input_byte) {
         finishSequence;
 }
 
-inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
+static inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
     switch (codepoint) {
         case '!': continue_sequence(ESC_CSI_EXCLAMATION)
             break;
@@ -854,6 +826,8 @@ inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
         case 'g': {
             char arg = getArg(emulator, 0, 1, 1);
             switch (arg) {
+                default:
+                    break;
                 case 0:
                     emulator->tabStop[cursor_col] = false;
                     break;
@@ -876,6 +850,8 @@ inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
         case 'n': {
             char arg = emulator->csi.arg[0];
             switch (arg) {
+                default:
+                    break;
                 case 5: {
                     char byte[] = {27, '[', '0', 'n'};
                     write(emulator->fd, byte, 4);
@@ -905,6 +881,8 @@ inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
         case 't': {
             char arg = emulator->csi.arg[0];
             switch (arg) {
+                default:
+                    break;
                 case 11:
                     write(emulator->fd, "\033[1t", 4);
                     break;
@@ -942,32 +920,290 @@ inline void do_csi(term_emulator *emulator, uint_fast32_t codepoint) {
 
 #define osc_arg emulator->osc.args
 
-inline void do_device_control(term_emulator *emulator, uint_fast32_t codepoint) {
+static inline void do_device_control(term_emulator *emulator, uint_fast32_t codepoint) {
     if ('\\' == codepoint) {
         if (strncmp(osc_arg, "$q", 2) == 0) {
             if (strncmp("$q\"p", osc_arg, 4) == 0) write(emulator->fd, "\033P1$r64;1\"p\033\\", 13);
             else
                 finishSequence;
         } else if (strncmp(osc_arg, "+q", 2) == 0) {
+            char *dcs = osc_arg + 2;
+            size_t len = 0;
+            bool exit = false;
+            while (1) {
+                len = strchr(dcs, ';') - dcs;
+                if (0 >= len) {
+                    len = strlen(dcs);
+                    exit = true;//last part
+                }
+                if (0 == len % 2) {
+                    char trans_buff[len], *err = NULL;
+                    char trans_buff_len = 0;
+                    for (int i = 0; i < len; i += 2) {
+                        if (dcs[i] >= '0' && dcs[i + 1] >= '0') {
+                            char c1 = dcs[i], c0 = dcs[i + 1];
+                            if (c0 >= '9') c0 -= '0';
+                            else if (c0 >= 'a' && c0 <= 'f') c0 -= ('a' - 10);
+                            else if (c0 >= 'A' && c0 <= 'F') c0 -= ('A' - 10);
+                            else continue;
+                            if (c1 >= '9')c1 -= '0';
+                            else if (c1 >= 'a' && c1 <= 'f') c1 -= ('a' - 10);
+                            else if (dcs[i] >= 'A' && dcs[i] <= 'F') c1 -= ('A' - 10);
+                            else continue;
+                            trans_buff[trans_buff_len++] = c1 * 16 + c0;
+                        }
+                    }
+                    char *response = NULL, response_len;
+                    if (strncmp(trans_buff, "Co", 2) == 0 || strncmp(trans_buff, "colors", 6) == 0) {
+                        response = "256";
+                        response_len = 3;
+                    } else if (strncmp(trans_buff, "TN", 2) == 0 || strncmp(trans_buff, "name", 4) == 0) {
+                        response = "xterm";
+                        response_len = 5;
+                    } else
+                        response_len = get_code_from_term_cap(&response, trans_buff, trans_buff_len, decset_bit.APPLICATION_CURSOR_KEYS,
+                                                              decset_bit.APPLICATION_KEYPAD);
 
+                    if (response_len == 0) {
+                        write(emulator->fd, "\033P0+r", 5);
+                        write(emulator->fd, dcs, len);
+                        write(emulator->fd, "\033\\", 2);
+                    } else {
+                        char hex_encoder[2 * response_len];
+                        for (int i = 0; i < response_len; i++)
+                            sprintf(hex_encoder + 2 * i, "%02x", response[i]);
+                        write(emulator->fd, "\033P1+r", 5);
+                        write(emulator->fd, dcs, len);
+                        write(emulator->fd, "=", 1);
+                        write(emulator->fd, hex_encoder, len * 2);
+                        write(emulator->fd, "\033\\", 2);
+                    }
+                }
+                if (exit) break;
+                dcs += len + 1;
+            }
         }
+        finishSequence;
     } else {
         if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
-            free(emulator->osc.args);
             emulator->osc.len = 0;
             finishSequence;
         } else {
-            char s[4];
-            char len = codepoint_to_utf8(codepoint, s);
-            emulator->osc.args = realloc(emulator->osc.args, emulator->osc.len + len);
-            memcpy(emulator->osc.args + emulator->osc.len, s, len);
-            emulator->osc.len += len;
+            emulator->osc.len += codepoint_to_utf8(codepoint, emulator->osc.args + emulator->osc.len);
             continue_sequence(esc_state)
         }
     }
 }
 
+static void do_dec_set_or_reset(term_emulator *emulator, bool setting, short external_bit) {
+    switch (external_bit) {
+        default:
+            finishSequence;
+            break;
+        case 1 :
+            decset_bit.APPLICATION_CURSOR_KEYS = setting;
+            break;
+        case 3: {
+            left_margin = top_margin = 0;
+            bottom_margin = ROWS;
+            right_margin = COLUMNS;
+            decset_bit.LEFTRIGHT_MARGIN_MODE = false;
+            block_clear(0, 0, COLUMNS, ROWS);
+            cursor_row = cursor_col = 0;
+            about_to_autowrap = false;
+        }
+            break;
+        case 4:
+        case 9:
+        case 12:
+        case 40:
+        case 45:
+        case 1001:
+        case 1003:
+        case 1005:
+        case 1015:
+        case 1034:
+            break;
+        case 5 :
+            decset_bit.REVERSE_VIDEO = setting;
+            break;
+        case 6 :
+            decset_bit.ORIGIN_MODE = setting;
+            if (setting)set_cursor_position_origin_mode(emulator, 0, 0);
+            break;
+        case 7 :
+            decset_bit.AUTOWRAP = setting;
+            break;
+        case 25 :
+            decset_bit.CURSOR_ENABLED = setting;
+            break;
+        case 66 :
+            decset_bit.APPLICATION_KEYPAD = setting;
+            break;
+        case 69 :
+            decset_bit.LEFTRIGHT_MARGIN_MODE = setting;
+            if (!setting) {
+                left_margin = 0;
+                right_margin = COLUMNS;
+            }
+            break;
+        case 1000 :
+            decset_bit.MOUSE_TRACKING_PRESS_RELEASE = setting;
+            break;
+        case 1002 :
+            decset_bit.MOUSE_TRACKING_BUTTON_EVENT = setting;
+            break;
+        case 1004 :
+            decset_bit.SEND_FOCUS_EVENTS = setting;
+            break;
+        case 1006 :
+            decset_bit.MOUSE_PROTOCOL_SGR = setting;
+            break;
+        case 1048:
+            if (setting) save_cursor()
+            else
+                restore_cursor()
+            break;
+        case 47:
+        case 1047:
+        case 1049: {
+            term_buffer *new_screen = setting ? &emulator->alt : &emulator->main;
+            if (new_screen != emulator->screen) {
+                if (setting) { save_cursor() }
+                else {
+                    restore_cursor()
+                }
+                if (new_screen == &emulator->alt) blockSet(new_screen, 0, 0, COLUMNS, ROWS, (glyph) {' ', cursor_style});
+            }
+        }
+            break;
+        case 2004 :
+            decset_bit.BRACKETED_PASTE_MODE = setting;
+            break;
+    }
+}
+
+static inline void do_csi_questionmark(term_emulator *emulator, uint_fast32_t codepoint) {
+    switch (codepoint) {
+        case 'J':
+        case 'K': {
+            about_to_autowrap = false;
+            char arg = getArg(emulator, 0, 0, 0);
+            char start_col = -1, end_col = -1;
+            short start_row = -1, end_row = -1;
+            bool just_row = 'K' == codepoint;
+            switch (arg) {
+                case 0:
+                    start_col = cursor_col;
+                    start_row = cursor_row;
+                    end_col = COLUMNS;
+                    end_row = just_row ? cursor_row + 1 : ROWS;
+                    break;
+                case 1:
+                    start_col = 0;
+                    start_row = just_row ? cursor_row : 0;
+                    end_col = cursor_col + 1;
+                    end_row = cursor_row + 1;
+                    break;
+                case 2:
+                    start_col = 0;
+                    start_row = just_row ? cursor_row : 0;
+                    end_col = cursor_col + 1;
+                    end_row = just_row ? cursor_row + 1 : ROWS;
+                    break;
+                default:
+                    finishSequence;
+                    break;
+            }
+            glyph fill = {' ', cursor_style};
+            for (short row = start_row; row < end_row; row++) {
+                short internal_row = (emulator->screen->first_row + row) % emulator->screen->total_rows;
+                glyph *dst = emulator->screen->lines[internal_row].text + start_col;
+                for (char col = start_col; col < end_col; col++) {
+                    if (dst->style.effect.PROTECTED == 0)
+                        *dst = fill;
+                    dst++;
+                }
+            }
+        }
+            break;
+        case 'h':
+        case 'l': {
+            if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS)emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
+            bool setting = 'h' == codepoint;
+            for (int i = 0; i < emulator->csi.index; i++)
+                do_dec_set_or_reset(emulator, setting, emulator->csi.arg[i]);
+        }
+            break;
+        case 'n':
+            if (6 == emulator->csi.arg[0])
+                dprintf(emulator->fd, "\033[?%d;%d;1R", cursor_row + 1, cursor_col + 1);
+            else
+                finishSequence;
+            break;
+        case 'r':
+        case 's':
+            if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS) emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
+            for (char i = 0; i < MAX_ESCAPE_PARAMETERS; i++) {
+                short external_bit = emulator->csi.arg[i];
+                bool setting;
+                switch (external_bit) {
+                    case 1 :
+                        setting = decset_bit.APPLICATION_CURSOR_KEYS;
+                        break;
+                    case 5 :
+                        setting = decset_bit.REVERSE_VIDEO;
+                        break;
+                    case 6 :
+                        setting = decset_bit.ORIGIN_MODE;
+                        break;
+                    case 7 :
+                        setting = decset_bit.AUTOWRAP;
+                        break;
+                    case 25 :
+                        setting = decset_bit.CURSOR_ENABLED;
+                        break;
+                    case 66 :
+                        setting = decset_bit.APPLICATION_KEYPAD;
+                        break;
+                    case 69 :
+                        setting = decset_bit.LEFTRIGHT_MARGIN_MODE;
+                        break;
+                    case 1000 :
+                        setting = decset_bit.MOUSE_TRACKING_PRESS_RELEASE;
+                        break;
+                    case 1002 :
+                        setting = decset_bit.MOUSE_TRACKING_BUTTON_EVENT;
+                        break;
+                    case 1004 :
+                        setting = decset_bit.SEND_FOCUS_EVENTS;
+                        break;
+                    case 1006 :
+                        setting = decset_bit.MOUSE_PROTOCOL_SGR;
+                        break;
+                    case 2004 :
+                        setting = decset_bit.BRACKETED_PASTE_MODE;
+                        break;
+                    default:
+                        return;
+                }
+                if ('s' != codepoint)
+                    do_dec_set_or_reset(emulator, setting, external_bit);
+            }
+            break;
+        case '$': continue_sequence(ESC_CSI_QUESTIONMARK_ARG_DOLLAR)
+            break;
+        default:
+            parse_arg(emulator, codepoint);
+            break;
+    }
+}
+
 inline void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) {
+    switch (esc_state) {
+        case ESC_APC:
+
+    }
     switch (codepoint) {
         case 0:
             break;
@@ -1015,17 +1251,26 @@ inline void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) 
             }
             break;
         case 27:
-            if (ESC_OSC == esc_state) continue_sequence(ESC_OSC_ESC)
-            else {
-                esc_state = ESC;
-                emulator->csi.index = 0;
-                for (int i = 0; i < MAX_ESCAPE_PARAMETERS; i++)
-                    emulator->csi.arg[i] = -1;
+            switch (esc_state) {
+                case ESC_APC: continue_sequence(ESC_APC_ESCAPE)
+                    return;
+                case ESC_OSC: continue_sequence(ESC_OSC_ESC)
+                    break;
+                default:
+                    esc_state = ESC;
+                    emulator->csi.index = 0;
+                    for (int i = 0; i < MAX_ESCAPE_PARAMETERS; i++)
+                        emulator->csi.arg[i] = -1;
+                    break;
             }
             break;
         default: {
             emulator->csi.dontContinueSequence = true;
             switch (esc_state) {
+                case ESC_APC_ESCAPE:
+                    if (codepoint == '\\') finishSequence;
+                    else continue_sequence(ESC_APC)
+                    return;
                 case ESC_NONE:
                     if (32 <= codepoint)emit_codepoint(emulator, codepoint);
                     break;
@@ -1052,6 +1297,9 @@ inline void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) 
                         finishSequence;
                     break;
                 case ESC_CSI_QUESTIONMARK:
+                    do_csi_questionmark(emulator, codepoint);
+                    break;
+                case ESC_CSI_BIGGERTHAN:
                     switch (codepoint) {
                         case 'c':
                             write(emulator->fd, "\033[>41;320;0c", 12);
@@ -1245,22 +1493,18 @@ inline void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) 
                             break;
                     }
                     break;
-                case 9:
+                case ESC_PERCENT:
                     break;
                 case ESC_OSC:
                     switch (codepoint) {
                         case 7:
                             do_osc_set_text_parameters(emulator, "\007");
                             break;
-                        case 27: continue_sequence(ESC_OSC_ESC);
+                        case 27: continue_sequence(ESC_OSC_ESC)
                             break;
                         default:
                             if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
-                                char s[4];
-                                char len = codepoint_to_utf8(codepoint, s);
-                                emulator->osc.args = realloc(emulator->osc.args, emulator->osc.len + len);
-                                memcpy(emulator->osc.args + emulator->osc.len, s, len);
-                                emulator->osc.len += len;
+                                emulator->osc.len += codepoint_to_utf8(codepoint, emulator->osc.args + emulator->osc.len);
                                 continue_sequence(esc_state)
                             } else
                                 finishSequence;
@@ -1271,11 +1515,8 @@ inline void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) 
                     if ('\\' == codepoint) do_osc_set_text_parameters(emulator, "\033\\");
                     else {
                         if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
-                            char s[5] = {27};
-                            char len = codepoint_to_utf8(codepoint, s + 1) + 1;
-                            emulator->osc.args = realloc(emulator->osc.args, emulator->osc.len + len);
-                            memcpy(emulator->osc.args + emulator->osc.len, s, len);
-                            emulator->osc.len += len;
+                            osc_arg[emulator->osc.len++] = 27;
+                            emulator->osc.len += codepoint_to_utf8(codepoint, emulator->osc.args + emulator->osc.len);
                             continue_sequence(esc_state)
                         } else
                             finishSequence;
@@ -1284,9 +1525,104 @@ inline void process_codepoint(term_emulator *emulator, uint_fast32_t codepoint) 
                 case ESC_P:
                     do_device_control(emulator, codepoint);
                     break;
-            }
-        }
+                case ESC_CSI_QUESTIONMARK_ARG_DOLLAR:
+                    if ('p' == codepoint) {
+                        short mode = emulator->csi.arg[0];
+                        char value;
+                        switch (mode) {
+                            case 1 :
+                                value = decset_bit.APPLICATION_CURSOR_KEYS ? 1 : 2;
+                                break;
+                            case 5 :
+                                value = decset_bit.REVERSE_VIDEO ? 1 : 2;
+                                break;
+                            case 6 :
+                                value = decset_bit.ORIGIN_MODE ? 1 : 2;
+                                break;
+                            case 7 :
+                                value = decset_bit.AUTOWRAP ? 1 : 2;
+                                break;
+                            case 25 :
+                                value = decset_bit.CURSOR_ENABLED ? 1 : 2;
+                                break;
+                            case 47:
+                            case 1047:
+                            case 1049:
+                                value = (emulator->screen == &emulator->alt) ? 1 : 2;
+                                break;
+                            case 66 :
+                                value = decset_bit.APPLICATION_KEYPAD ? 1 : 2;
+                                break;
+                            case 69 :
+                                value = decset_bit.LEFTRIGHT_MARGIN_MODE ? 1 : 2;
+                                break;
+                            case 1000 :
+                                value = decset_bit.MOUSE_TRACKING_PRESS_RELEASE ? 1 : 2;
+                                break;
+                            case 1002 :
+                                value = decset_bit.MOUSE_TRACKING_BUTTON_EVENT ? 1 : 2;
+                                break;
+                            case 1004 :
+                                value = decset_bit.SEND_FOCUS_EVENTS ? 1 : 2;
+                                break;
+                            case 1006 :
+                                value = decset_bit.MOUSE_PROTOCOL_SGR ? 1 : 2;
+                                break;
+                            case 2004 :
+                                value = decset_bit.BRACKETED_PASTE_MODE ? 1 : 2;
+                                break;
+                            default:
+                                value = 0;
+                                break;
+                        }
+                        dprintf(emulator->fd, "\033[?%d;%d$y", mode, value);
+                    } else
+                        finishSequence;
+                    break;
 
+                case ESC_CSI_ARGS_SPACE:
+                    switch (codepoint) {
+                        case 'q': {
+                            char arg = getArg(emulator, 0, 0, 0);
+                            switch (arg) {
+                                case 0:
+                                case 1:
+                                case 2:
+                                    emulator->cursor.cursor_shape = BLOCK;
+                                    break;
+                                case 3:
+                                case 4:
+                                    emulator->cursor.cursor_shape = UNDERLINE;
+                                    break;
+                                case 5:
+                                case 6:
+                                    emulator->cursor.cursor_shape = BAR;
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                        case 't':
+                        case 'u':
+                            break;
+                        default:
+                            finishSequence;
+                            break;
+                    }
+                    break;
+                case ESC_CSI_ARGS_ASTERIX: {
+                    char attribute_change_extent = emulator->csi.arg[0];
+                    if ('x' == codepoint && (0 <= attribute_change_extent && 2 >= attribute_change_extent))
+                        decset_bit.RECTANGULAR_CHANGEATTRIBUTE = 2 == attribute_change_extent;
+                    else
+                        finishSequence;
+                }
+                    break;
+                default:
+                    finishSequence;
+            }
+            if (emulator->csi.dontContinueSequence) finishSequence;
+        }
     }
 }
 
@@ -1298,4 +1634,3 @@ void init_term_emulator(term_emulator *emulator) {
     reset_emulator(emulator);
 //TODO : START pseudo terminal and read it
 }
-

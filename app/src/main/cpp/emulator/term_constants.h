@@ -27,7 +27,7 @@ enum ESCAPE_STATES {
 };
 
 #define MAX_ESCAPE_PARAMETERS 16
-#define MAX_OSC_STRING_LENGTH 8192
+#define MAX_OSC_STRING_LENGTH 2048
 typedef struct {
     unsigned short APPLICATION_CURSOR_KEYS: 1;
     unsigned short REVERSE_VIDEO: 1;

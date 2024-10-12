@@ -21,8 +21,7 @@
             android:name=".Main"
             android:enableOnBackInvokedCallback="true"
             android:exported="true"
-            android:taskAffinity=""
-            android:theme="@android:cursor_style/Theme.DeviceDefault">
+            android:taskAffinity="">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
