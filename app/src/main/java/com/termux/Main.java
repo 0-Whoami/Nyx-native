@@ -1,7 +1,11 @@
 package com.termux;
 
 import android.app.Activity;
+import android.content.res.AssetManager;
 import android.os.Bundle;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 
 public final class Main extends Activity {
     static {
@@ -11,13 +15,25 @@ public final class Main extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        long t = System.currentTimeMillis();
-        print();
-        System.out.println("JNI : " + (System.currentTimeMillis() - t));
-        t = System.currentTimeMillis();
-        for (long x = 0; x <= 1e10; ++x) ;
-        System.out.println("Java : " + (System.currentTimeMillis() - t));
-    }
+        SurfaceView view = new SurfaceView(this);
+        setContentView(view);
+        view.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override
+            public void surfaceCreated(SurfaceHolder holder) {
+                init(holder.getSurface());
+            }
 
-    native void print();
+            @Override
+            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+
+            }
+
+            @Override
+            public void surfaceDestroyed(SurfaceHolder holder) {
+
+            }
+        });
+    }
+    public native void init(Surface view);
+    public native void load_asset_manager(AssetManager assetManager);
 }

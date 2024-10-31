@@ -19,19 +19,6 @@
       "versionCode": 1,
       "versionName": "1.0.wear",
       "outputFile": "nyx_release_armeabi-v7a.apk"
-    },
-    {
-      "type": "ONE_OF_MANY",
-      "filters": [
-        {
-          "filterType": "ABI",
-          "value": "x86_64"
-        }
-      ],
-      "attributes": [],
-      "versionCode": 1,
-      "versionName": "1.0.wear",
-      "outputFile": "nyx_release_x86_64.apk"
     }
   ],
   "elementType": "File",

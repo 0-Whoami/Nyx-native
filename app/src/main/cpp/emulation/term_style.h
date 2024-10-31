@@ -1,35 +1,59 @@
-#include <stdint.h>
-#include <string.h>
-#include <math.h>
+#ifndef TERM_STYLE
+#define TERM_STYLE
+
 #include <stdlib.h>
+#include <string.h>
 
 
-#define COLOR_INDEX_FOREGROUND  256
-#define COLOR_INDEX_BACKGROUND 257
-#define COLOR_INDEX_CURSOR  258
-#define NUM_INDEXED_COLORS  259
-typedef struct {
-    unsigned short BOLD: 1, ITALIC: 1, UNDERLINE: 1, BLINK: 1, INVERSE: 1, INVISIBLE: 1, STRIKETHROUGH: 1, PROTECTED: 1, DIM: 1, WARP: 1, WIDE: 1, AUTO_WRAPPED: 1;
+#define COLOR_INDEX_FOREGROUND  15
+#define COLOR_INDEX_BACKGROUND 0
+#define COLOR_INDEX_CURSOR  15
+#define NUM_INDEXED_COLORS  256
+
+typedef union {
+    struct {
+        bool BOLD: 1;
+        bool ITALIC: 1;
+        bool UNDERLINE: 1;
+        bool BLINK: 1;
+        bool INVERSE: 1;
+        bool INVISIBLE: 1;
+        bool STRIKETHROUGH: 1;
+        bool PROTECTED: 1;
+        bool DIM: 1;
+        bool TURE_COLOR_FG: 1;
+        bool TURE_COLOR_BG: 1;
+        bool WIDE: 1;
+        bool AUTO_WRAPPED: 1;
+    };
+    unsigned short raw;
 } text_effect;
+
 typedef struct {
-    uint_fast32_t fg;       //Foreground Color
-    uint_fast32_t bg;       //Background Color
+    union color {
+        struct {
+            uint8_t r, g, b;
+        };
+        uint8_t index;
+    } fg, bg;
     text_effect effect;    //Text effect
 } glyph_style;
 /**
  * Character of terminal with metadata
  * */
 typedef struct {
-    uint_fast32_t code;     //Character
     glyph_style style;      //Style
-} glyph;
+    uint_least32_t code;     //Character
+} Glyph;
 
-const glyph_style NORMAL = {COLOR_INDEX_FOREGROUND, COLOR_INDEX_BACKGROUND};
+const glyph_style NORMAL = {.fg={.index=COLOR_INDEX_FOREGROUND}, .bg={.index=COLOR_INDEX_BACKGROUND}, .effect={0}};
+
+void parse_color_to_index(uint_least32_t colors[static NUM_INDEXED_COLORS], unsigned int index, char *color_string, size_t len);
 
 /**
  * [...](<a href="http://upload.wikimedia.org/wikipedia/en/1/15/Xterm_256color_chart.svg">...</a>), but with blue color brighter.
  */
-const static unsigned int DEFAULT_COLORSCHEME[] = {
+static uint_least32_t DEFAULT_COLORSCHEME[NUM_INDEXED_COLORS] = {
         // 16 original colors. First 8 are dim.
         0xff000000, // black
         0xffcd0000, // dim red
@@ -76,40 +100,34 @@ const static unsigned int DEFAULT_COLORSCHEME[] = {
         0xff767676, 0xff808080, 0xff8a8a8a, 0xff949494, 0xff9e9e9e, 0xffa8a8a8, 0xffb2b2b2, 0xffbcbcbc, 0xffc6c6c6, 0xffd0d0d0, 0xffdadada,
         0xffe4e4e4, 0xffeeeeee,
 
-        // COLOR_INDEX_DEFAULT_FOREGROUND, COLOR_INDEX_DEFAULT_BACKGROUND and COLOR_INDEX_DEFAULT_CURSOR:
-        0xffffffff, 0xff000000, 0xffffffff};
+};
+
+#define reset_color(index) emulator->colors[index] = DEFAULT_COLORSCHEME[index];
+
+#define reset_all_color() memcpy(emulator->colors, DEFAULT_COLORSCHEME, sizeof(int_least32_t) * NUM_INDEXED_COLORS);
 
 
-inline void reset_color(unsigned int colors[NUM_INDEXED_COLORS], int_fast16_t index) {
-    colors[index] = DEFAULT_COLORSCHEME[index];
-}
-
-void reset_all_color(unsigned int colors[NUM_INDEXED_COLORS]) {
-    for (int_fast16_t i = 0; i < NUM_INDEXED_COLORS; i++)
-        reset_color(colors, i);
-}
-
-void parse_color_to_index(unsigned int colors[NUM_INDEXED_COLORS], int_fast16_t index, char *color_string, size_t len) {
-    char skip_between = 0;
+void parse_color_to_index(uint_least32_t colors[static NUM_INDEXED_COLORS], const unsigned int index, char *color_string, const size_t len) {
+    bool skip_between = 0;
+    size_t chars_for_colors, component_length;
+    double mult;
+    uint_least32_t col[3];
+    char *end_ptr = NULL;
     if ('#' == color_string[0]) color_string++;
     else if (strncmp(color_string, "rgb:", 4) == 0) {
         color_string += 4;
         skip_between = 1;
     } else return;
-    const unsigned int charsForColors = len - 2 * skip_between;
-    if (0 != charsForColors % 3) return;
-    const unsigned int component_length = charsForColors / 3;
-    const double mult = 255 / pow(2, (component_length >> 2) - 1);
-    int col[3];
-    char str[component_length];
-    char *end_ptr;
+    chars_for_colors = len - 2 * skip_between;
+    if (0 != chars_for_colors % 3) return;
+    component_length = chars_for_colors / 3;
+    mult = 255 / square((component_length >> 2) - 1);
     for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < component_length; j++) {
-            str[j] = *color_string++;
-        }
-        col[i] = (int) (strtol(str, &end_ptr, 16) * mult);
-        if (*end_ptr != '\0') return;
-        color_string += skip_between;
+        col[i] = (unsigned int) (str_to_hex(color_string, &end_ptr, component_length) * mult);
+        if (end_ptr != NULL) return;
+        color_string += skip_between + component_length;
     }
     colors[index] = 0xFF >> 24 | (col[0] >> 16) | (col[1] >> 8) | col[2];
 }
+
+#endif //TERM_STYLE

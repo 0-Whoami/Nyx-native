@@ -3,13 +3,18 @@
     <option name="myName" value="Project Default" />
     <inspection_tool class="ClassName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="ConstPropertyName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="EmptyDirectory" enabled="true" level="WARNING" enabled_by_default="true" />
     <inspection_tool class="EnumEntryName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="FunctionName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="InconsistentCommentForJavaParameter" enabled="false" level="WARNING" enabled_by_default="false" />
+    <inspection_tool class="InconsistentLineSeparators" enabled="true" level="WARNING" enabled_by_default="true" />
     <inspection_tool class="JavadocDeclaration" enabled="true" level="WARNING" enabled_by_default="true">
       <option name="ADDITIONAL_TAGS" value="hide,hide,hide" />
     </inspection_tool>
     <inspection_tool class="LocalVariableName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="LongLine" enabled="true" level="WARNING" enabled_by_default="true" />
+    <inspection_tool class="Misra" enabled="true" level="WARNING" enabled_by_default="true" />
+    <inspection_tool class="OCUnusedIncludeDirective" enabled="true" level="WARNING" enabled_by_default="true" />
     <inspection_tool class="ObjectPrivatePropertyName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="ObjectPropertyName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="PackageName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
@@ -41,7 +46,10 @@
       <option name="composableFile" value="true" />
     </inspection_tool>
     <inspection_tool class="PrivatePropertyName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="ProblematicWhitespace" enabled="true" level="WARNING" enabled_by_default="true" />
     <inspection_tool class="PropertyName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="TestFunctionName" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="TodoComment" enabled="true" level="WARNING" enabled_by_default="true" />
+    <inspection_tool class="UnconstrainedVariableType" enabled="true" level="WARNING" enabled_by_default="true" />
   </profile>
 </component>

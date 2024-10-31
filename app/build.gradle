@@ -13,7 +13,32 @@ android {
     defaultConfig {
         externalNativeBuild {
             ndkBuild {
-//                cFlags '-std=c11', '-Wall', '-Wextra', '-Werror', '-Os', '-fno-stack-protector', '-Wl,--gc-sections', '-fvisibility=hidden'
+                cFlags '-std=c11',
+                        '-Wall',
+                        '-Wextra',
+                        '-Werror',
+                        '-Ofast',
+                        '-fno-stack-protector',
+                        '-Wl,--gc-sections',
+                        '-Wl,--strip-all ',
+                        '-Wl,--icf=safe',
+                        '-fvisibility=hidden',
+                        '-fvisibility-inlines-hidden',
+//                        '-fsanitize=undefined',
+                        '-Rpass=loop-vectorize',
+                        '-Rpass=inlining',
+                        '-Rpass=loop-unroll',
+                        '-Rpass-missed=loop-vectorize',
+                        '-Rpass-missed=inlining',
+                        '-Rpass-missed=loop-unroll',
+                        '-flto',
+                        '-mthumb',
+                        '-march=armv7-a',
+                        '-mtune=cortex-a55',
+                        '-mfpu=neon-vfpv4',
+                        '-mfloat-abi=softfp',
+                        '-fomit-frame-pointer'
+
             }
 //        cmake {
 //            path file('src/main/cpp/CMakeLists.txt')
@@ -30,11 +55,14 @@ android {
             abi {
                 enable(true)
                 reset()
-                include 'x86_64', 'armeabi-v7a'
+                include 'armeabi-v7a'
                 universalApk false
             }
         }
         versionNameSuffix '.wear'
+        shaders {
+            glslcArgs.addAll(['-c', '-g'])
+        }
     }
     externalNativeBuild {
         ndkBuild {
