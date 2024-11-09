@@ -2,11 +2,9 @@ buildscript {
     repositories {
         mavenCentral()
         google()
-
-
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.8.0-alpha08'
+        classpath 'com.android.tools.build:gradle:8.8.0-alpha09'
     }
 }
 

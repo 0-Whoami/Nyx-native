@@ -11,64 +11,32 @@ android {
     }
     buildToolsVersion '35.0.0'
     defaultConfig {
-        externalNativeBuild {
-            ndkBuild {
-                cFlags '-std=c11',
-                        '-Wall',
-                        '-Wextra',
-                        '-Werror',
-                        '-Ofast',
-                        '-fno-stack-protector',
-                        '-Wl,--gc-sections',
-                        '-Wl,--strip-all ',
-                        '-Wl,--icf=safe',
-                        '-fvisibility=hidden',
-                        '-fvisibility-inlines-hidden',
-//                        '-fsanitize=undefined',
-                        '-Rpass=loop-vectorize',
-                        '-Rpass=inlining',
-                        '-Rpass=loop-unroll',
-                        '-Rpass-missed=loop-vectorize',
-                        '-Rpass-missed=inlining',
-                        '-Rpass-missed=loop-unroll',
-                        '-flto',
-                        '-mthumb',
-                        '-march=armv7-a',
-                        '-mtune=cortex-a55',
-                        '-mfpu=neon-vfpv4',
-                        '-mfloat-abi=softfp',
-                        '-fomit-frame-pointer'
-
-            }
-//        cmake {
-//            path file('src/main/cpp/CMakeLists.txt')
-//            version '3.22.1'
-//        }
-        }
         applicationId "com.termux"
         minSdk 24
         targetSdk 28
         versionCode 1
         versionName "1.0"
         resourceConfigurations += ['en', 'xhdpi']
-        splits {
-            abi {
-                enable(true)
-                reset()
-                include 'armeabi-v7a'
-                universalApk false
-            }
-        }
         versionNameSuffix '.wear'
         shaders {
             glslcArgs.addAll(['-c', '-g'])
         }
+        splits {
+            abi {
+                enable(true)
+                reset()
+                include  'armeabi-v7a'
+                universalApk false
+            }
+        }
     }
+
     externalNativeBuild {
         ndkBuild {
             path 'src/main/cpp/Android.mk'
         }
     }
+
     buildTypes {
         release {
             minifyEnabled true
@@ -79,6 +47,38 @@ android {
             renderscriptDebuggable false
             pseudoLocalesEnabled false
             crunchPngs true
+            externalNativeBuild {
+                ndkBuild {
+                    cFlags '-std=c11',
+                            '-Wall',
+                            '-Wextra',
+                            '-Werror',
+                            '-Ofast',
+                            '-fno-stack-protector',
+                            '-Wl,--gc-sections',
+                            '-Wl,--strip-all ',
+                            '-Wl,--icf=safe',
+                            '-fvisibility=hidden',
+                            '-fvisibility-inlines-hidden',
+//                        '-fsanitize=undefined',
+                            '-Rpass=loop-vectorize',
+                            '-Rpass=inlining',
+                            '-Rpass=loop-unroll',
+                            '-Rpass-missed=loop-vectorize',
+                            '-Rpass-missed=inlining',
+                            '-Rpass-missed=loop-unroll',
+                            '-flto',
+                            '-mthumb',
+                            '-march=armv7-a',
+                            '-mtune=cortex-a55',
+                            '-mfpu=neon-vfpv4',
+                            '-mfloat-abi=softfp',
+                            '-fomit-frame-pointer'
+                }
+            }
+        }
+        debug {
+            jniDebuggable true
         }
     }
     compileOptions {
@@ -101,5 +101,3 @@ android {
         }
     }
 }
-
-dependencies {}

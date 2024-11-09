@@ -16,32 +16,27 @@
 #define MAX_ESCAPE_PARAMETERS 16
 #define MAX_OSC_STRING_LENGTH 2048
 
-#define UTF_BUFFER_SIZE 4
-static const char utf_byte_mask[UTF_BUFFER_SIZE] = {0b111, 0b111, 0b11111, 0b1111};
-
-typedef enum {
-    ESC_NONE = 0,
-    ESC = 1,
-    ESC_POUND = 2,
-    ESC_SELECT_LEFT_PAREN = 3,
-    ESC_SELECT_RIGHT_PAREN = 4,
-    ESC_CSI = 6,
-    ESC_CSI_QUESTIONMARK = 7,
-    ESC_CSI_DOLLAR = 8,
-    ESC_PERCENT = 9,
-    ESC_OSC = 10,
-    ESC_OSC_ESC = 11,
-    ESC_CSI_BIGGERTHAN = 12,
-    ESC_P = 13,
-    ESC_CSI_QUESTIONMARK_ARG_DOLLAR = 14,
-    ESC_CSI_ARGS_SPACE = 15,
-    ESC_CSI_ARGS_ASTERIX = 16,
-    ESC_CSI_DOUBLE_QUOTE = 17,
-    ESC_CSI_SINGLE_QUOTE = 18,
-    ESC_CSI_EXCLAMATION = 19,
-    ESC_APC = 20,
-    ESC_APC_ESCAPE = 21
-} ESCAPE_STATES;
+#define ESC_NONE  0
+#define ESC  1
+#define ESC_POUND  2
+#define ESC_SELECT_LEFT_PAREN  3
+#define ESC_SELECT_RIGHT_PAREN  4
+#define ESC_CSI  6
+#define ESC_CSI_QUESTIONMARK  7
+#define ESC_CSI_DOLLAR  8
+#define ESC_PERCENT  9
+#define ESC_OSC  10
+#define ESC_OSC_ESC  11
+#define ESC_CSI_BIGGERTHAN  12
+#define ESC_P  13
+#define ESC_CSI_QUESTIONMARK_ARG_DOLLAR  14
+#define ESC_CSI_ARGS_SPACE  15
+#define ESC_CSI_ARGS_ASTERIX  16
+#define ESC_CSI_DOUBLE_QUOTE  17
+#define ESC_CSI_SINGLE_QUOTE  18
+#define ESC_CSI_EXCLAMATION  19
+#define ESC_APC  20
+#define ESC_APC_ESCAPE  21
 
 typedef union {
     struct {
@@ -74,104 +69,82 @@ typedef struct {
     DECSET_BIT decsetBit;
 } term_cursor;
 
-
 typedef struct {
-    int_fast64_t tabStop;
-    struct OSC {
-        char args[MAX_OSC_STRING_LENGTH];
-        size_t len;
-    } osc;
+    uint8_t *_tabStop;
     uint_least32_t colors[NUM_INDEXED_COLORS];
+    term_cursor cursor, _saved_state, _saved_state_alt;
     struct CSI {
         short arg[MAX_ESCAPE_PARAMETERS];
-        ESCAPE_STATES state: 8;
-        int index: 7;
+        uint8_t state;
+        uint8_t index;
         bool dontContinueSequence: 1;
-    } csi;
-    term_cursor cursor, saved_state, saved_state_alt;
-    Term_buffer main, alt;
+    } _csi;
+    Term_buffer _main, _alt;
     int fd;
     pid_t pid;
-    Term_buffer *screen;
-    int_least32_t last_codepoint;
-    int leftMargin, rightMargin, topMargin, bottomMargin;
-    unsigned short saved_decset;
+    Term_buffer *screen_buff;
+    uint_least32_t _last_codepoint;
+    int _leftMargin, _rightMargin, _topMargin, _bottomMargin;
+    struct OSC {
+        char args[MAX_OSC_STRING_LENGTH];
+        int len;
+    } _osc;
+    unsigned short _saved_decset;
     CURSOR_SHAPE cursor_shape: 2;
     bool MODE_INSERT: 1, ABOUT_TO_AUTO_WRAP: 1;
 } Term_emulator;
 
 static unsigned short ROWS = 24;
 static unsigned short COLUMNS = 45;
-static unsigned short TRANSCRIPT_ROW = 200;
+static unsigned short TRANSCRIPT_ROWS = 200;
 
-static struct {
-    unsigned char buffer[UTF_BUFFER_SIZE];
-    uint8_t index: 4;
-    uint8_t to_follow: 4;
-} utf_buffer = {0};
-static unsigned char byte;
-static int code_point;
-
-
-#define finishSequence emulator->csi.state=ESC_NONE
-#define continue_sequence(new_esc_state) {emulator->csi.state = new_esc_state;emulator->csi.dontContinueSequence=false;}
+#define FD emulator->fd
+#define finishSequence emulator->_csi.state=ESC_NONE
+#define continue_sequence(new_esc_state) {emulator->_csi.state = new_esc_state;emulator->_csi.dontContinueSequence=false;}
 #define cursor_col emulator->cursor.x
 #define cursor_row emulator->cursor.y
 #define cursor_style emulator->cursor.style
-#define left_margin emulator->leftMargin
-#define right_margin emulator->rightMargin
-#define top_margin emulator->topMargin
-#define bottom_margin emulator->bottomMargin
-#define esc_state emulator->csi.state
+#define left_margin emulator->_leftMargin
+#define right_margin emulator->_rightMargin
+#define top_margin emulator->_topMargin
+#define bottom_margin emulator->_bottomMargin
+#define esc_state emulator->_csi.state
 #define decset_bit emulator->cursor.decsetBit
 #define term_mode decset_bit
-#define osc_arg emulator->osc.args
+#define osc_arg emulator->_osc.args
 #define about_to_autowrap emulator->ABOUT_TO_AUTO_WRAP
+#define screen emulator->screen_buff
 
 //TODO HOOK THIS UP
 __attribute__((weak))void copy_base64_to_clipboard_hooked(char *text);
 
 Term_emulator *new_term_emulator(const char *restrict cmd);
 
-void process_byte(Term_emulator *emulator, const unsigned char *buffer, int read_len);
+void read_data(Term_emulator *emulator);
 
 void destroy_term_emulator(Term_emulator *emulator);
 
 static int map_decset_bit(int bit) {
-    switch (bit) {
-        case 1 :
-            return 1 << 0;//DECSET_BIT_APPLICATION_CURSOR_KEYS;
-        case 5 :
-            return 1 << 1;//REVERSE_VIDEO;
-        case 6 :
-            return 1 << 2;//decset_bit.ORIGIN_MODE;
-        case 7 :
-            return 1 << 3;//decset_bit.AUTOWRAP;
-        case 25 :
-            return 1 << 4;//decset_bit.CURSOR_ENABLED;
-        case 66 :
-            return 1 << 5;//decset_bit.APPLICATION_KEYPAD;
-        case 69 :
-            return 1 << 6;//decset_bit.LEFTRIGHT_MARGIN_MODE;
-        case 1000 :
-            return 1 << 7;//decset_bit.MOUSE_TRACKING_PRESS_RELEASE;
-        case 1002 :
-            return 1 << 8;//decset_bit.MOUSE_TRACKING_BUTTON_EVENT;
-        case 1004 :
-            return 1 << 9;//decset_bit.SEND_FOCUS_EVENTS;
-        case 1006 :
-            return 1 << 10;//decset_bit.MOUSE_PROTOCOL_SGR;
-        case 2004 :
-            return 1 << 11;//decset_bit.BRACKETED_PASTE_MODE;
-        default:
-            return -1;
-    }
+    const static unsigned int lookupTable[][2] = {{1,    1 << 0},   // DECSET_BIT_APPLICATION_CURSOR_KEYS
+                                                  {5,    1 << 1},   // REVERSE_VIDEO
+                                                  {6,    1 << 2},   // ORIGIN_MODE
+                                                  {7,    1 << 3},   // AUTOWRAP
+                                                  {25,   1 << 4},   // CURSOR_ENABLED
+                                                  {66,   1 << 5},   // APPLICATION_KEYPAD
+                                                  {69,   1 << 6},   // LEFTRIGHT_MARGIN_MODE
+                                                  {1000, 1 << 7},   // MOUSE_TRACKING_PRESS_RELEASE
+                                                  {1002, 1 << 8},   // MOUSE_TRACKING_BUTTON_EVENT
+                                                  {1004, 1 << 9},   // SEND_FOCUS_EVENTS
+                                                  {1006, 1 << 10},  // MOUSE_PROTOCOL_SGR
+                                                  {2004, 1 << 11}   // BRACKETED_PASTE_MODE
+    };
+    return (int) map_search(bit, -1, lookupTable, 12);
 }
 
 static void reset_emulator(Term_emulator *restrict const emulator) {
-    emulator->csi.index = 0;
+    emulator->_csi.index = 0;
     esc_state = ESC_NONE;
-    emulator->csi.dontContinueSequence = true;
+    emulator->_csi.dontContinueSequence = true;
     term_mode.USE_G0 = true;
     term_mode.G0 = term_mode.G1 = emulator->MODE_INSERT = false;
     top_margin = left_margin = 0;
@@ -179,11 +152,14 @@ static void reset_emulator(Term_emulator *restrict const emulator) {
     right_margin = COLUMNS;
     cursor_style.fg.index = COLOR_INDEX_FOREGROUND;
     cursor_style.bg.index = COLOR_INDEX_BACKGROUND;
-    emulator->tabStop = 0;//Setting default tab stop
-    for (int i = 8; i < COLUMNS; i += 8) emulator->tabStop |= (1 << i);
+    {
+        int temp = CELI(COLUMNS, 8);
+        for (int i = 0; i < temp; i++) emulator->_tabStop[i] = 1;//Setting default tab stop
+
+    }
     decset_bit.AUTOWRAP = true;
     decset_bit.CURSOR_ENABLED = true;
-    emulator->saved_state = emulator->saved_state_alt = (term_cursor) {.style=NORMAL, .decsetBit= emulator->cursor.decsetBit};
+    emulator->_saved_state = emulator->_saved_state_alt = (term_cursor) {.style=NORMAL, .decsetBit= emulator->cursor.decsetBit};
     reset_all_color()
 }
 
@@ -191,20 +167,25 @@ static void do_osc_set_text_parameters(Term_emulator *restrict const emulator, c
     int value = 0;
     char *text_param;
     //TODO LIGHT STRLEN
-    int len = (int) strlen(text_param);
+    int len;
     bool end_of_input;
 
-    for (unsigned int osc_index = 0; osc_index < emulator->osc.len; osc_index++) {
+    for (int osc_index = 0; osc_index < emulator->_osc.len; osc_index++) {
         const char b = osc_arg[osc_index];
-        if (';' == b) {
-            text_param = osc_arg + osc_index + 1;
-            break;
-        } else if (BETWEEN(b, '0', '9')) value = value * 10 + (b - '0');
-        else {
-            finishSequence;
-            return;
+        switch (b) {
+            case ';':
+                text_param = osc_arg + osc_index + 1;
+                len = emulator->_osc.len - (osc_index + 1);
+                goto exit_loop;
+            case '0'...'9':
+                value = value * 10 + (b - '0');
+                break;
+            default:
+                finishSequence;
+                return;
         }
     }
+    exit_loop:;
 
     switch (value) {
         case 0:
@@ -256,7 +237,7 @@ static void do_osc_set_text_parameters(Term_emulator *restrict const emulator, c
                         unsigned int r = (65535 * ((rgb & 0x00FF0000) >> 16)) / 255;
                         unsigned int g = (65535 * ((rgb & 0x0000FF00) >> 8)) / 255;
                         unsigned int b = (65535 * (rgb & 0x000000FF)) / 255;
-                        dprintf(emulator->fd, "\033]%d;rgb:%04x/%04x/%04x%s", value, r, g, b, terminator);
+                        dprintf(FD, "\033]%d;rgb:%04x/%04x/%04x%s", value, r, g, b, terminator);
                     } else
                         parse_color_to_index(emulator->colors, special_index, color_spec, char_index - last_semi_index);
                     special_index++;
@@ -304,26 +285,22 @@ static void do_osc_set_text_parameters(Term_emulator *restrict const emulator, c
     }
 }
 
-static void block_copy_lines_down(Term_buffer *buffer, const unsigned int internal, int len) {
-    if (len) {
-        Term_row temp = malloc(COLUMNS * sizeof(Glyph));
-        memcpy(temp, buffer->lines[(internal + len--) % buffer->total_rows], COLUMNS * sizeof(Glyph));
-        while (0 <= --len)
-            buffer->lines[(internal + len + 1) % buffer->total_rows] = buffer->lines[(internal + len) % buffer->total_rows];
-        buffer->lines[internal % buffer->total_rows] = temp;
-    }
-}
-
-static void scroll_down_one_line(Term_emulator *restrict const emulator) {
+static void scroll_down(Term_emulator *restrict const emulator, int n) {
     if (0 != left_margin || right_margin != COLUMNS) {
-        block_copy(emulator->screen, left_margin, top_margin + 1, right_margin - left_margin, bottom_margin - top_margin - 1, left_margin,
-                   top_margin);
-        block_set(emulator->screen, left_margin, bottom_margin - 1, right_margin - left_margin, 1, (Glyph) {.code=' ', .style= cursor_style});
+        block_copy(screen, left_margin, top_margin + 1, right_margin - left_margin, bottom_margin - top_margin - 1, left_margin, top_margin);
+        block_set(screen, left_margin, bottom_margin - 1, right_margin - left_margin, 1, (Glyph) {.code=' ', .style= cursor_style});
     } else {
-        block_copy_lines_down(emulator->screen, emulator->screen->first_row, top_margin);
-        block_copy_lines_down(emulator->screen, (emulator->screen->first_row + bottom_margin) % emulator->screen->total_rows, ROWS - bottom_margin);
-        emulator->screen->first_row = (emulator->screen->first_row + 1) % emulator->screen->total_rows;
-        clear_row(emulator->screen->lines[(emulator->screen->first_row + bottom_margin - 1) % emulator->screen->total_rows], COLUMNS, &cursor_style);
+        int total_row = screen == &emulator->_alt ? ROWS : TRANSCRIPT_ROWS;
+        Term_row temp_rows[n], temp;
+        Glyph fill = {.code=' ', .style=cursor_style};
+        memcpy(temp_rows, screen->lines, n * sizeof(Term_row));
+        memcpy(screen->lines, screen->lines + n, (total_row - n) * sizeof(Term_row));
+        for (int y = 0; y < n; y++) {
+            temp = temp_rows[y];
+            screen->lines[total_row - 1 - y] = temp;
+            for (int x = 0; x < COLUMNS; x++) temp[x] = fill;
+        }
+        if (screen->history_rows + n - 1 < total_row - ROWS) screen->history_rows += n;
     }
 }
 
@@ -336,7 +313,7 @@ static void do_line_feed(Term_emulator *restrict const emulator) {
         }
     } else {
         if (new_cursor_row == bottom_margin) {
-            scroll_down_one_line(emulator);
+            scroll_down(emulator, 1);
             new_cursor_row = bottom_margin - 1;
         }
         cursor_row = new_cursor_row;
@@ -344,147 +321,82 @@ static void do_line_feed(Term_emulator *restrict const emulator) {
     }
 }
 
-static void emit_codepoint(Term_emulator *restrict const emulator, int_least32_t codepoint) {
-    const bool autowrap = decset_bit.AUTOWRAP;
+#define set_char(codepoint, x, y)  screen->lines[internal_row_buff(screen,y)][x] = (Glyph) {.code=codepoint, .style= cursor_style}
+
+static void emit_codepoint(Term_emulator *restrict const emulator, wchar_t codepoint) {
+    static const unsigned int table[][2] = {{'0', L'█'},    // Solid block
+                                            {'_', L' '},    // Blank
+                                            {'`', L'◆'},    // Diamond
+                                            {'a', L'▒'},    // Checker board
+                                            {'b', L'␉'},    // Horizontal tab
+                                            {'c', L'␌'},    // Form feed
+                                            {'d', L'\r'},   // Carriage return
+                                            {'e', L'␊'},    // Linefeed
+                                            {'f', L'°'},    // Degree
+                                            {'g', L'±'},    // Plus-minus
+                                            {'h', L'\n'},   // Newline
+                                            {'i', L'␋'},    // Vertical tab
+                                            {'j', L'┘'},    // Lower right corner
+                                            {'k', L'┐'},    // Upper right corner
+                                            {'l', L'┌'},    // Upper left corner
+                                            {'m', L'└'},    // Lower left corner
+                                            {'n', L'┼'},    // Crossing lines
+                                            {'o', L'⎺'},    // Horizontal line - scan 1
+                                            {'p', L'⎻'},    // Horizontal line - scan 3
+                                            {'q', L'─'},    // Horizontal line - scan 5
+                                            {'r', L'⎼'},    // Horizontal line - scan 7
+                                            {'s', L'⎽'},    // Horizontal line - scan 9
+                                            {'t', L'├'},    // T facing rightwards
+                                            {'u', L'┤'},    // T facing leftwards
+                                            {'v', L'┴'},    // T facing upwards
+                                            {'w', L'┬'},    // T facing downwards
+                                            {'x', L'│'},    // Vertical line
+                                            {'y', L'≤'},    // Less than or equal to
+                                            {'z', L'≥'},    // Greater than or equal to
+                                            {'{', L'π'},    // Pi
+                                            {'|', L'≠'},    // Not equal to
+                                            {'}', L'£'},    // UK pound
+                                            {'~', L'·'},    // Centered dot
+    };
+
     const int display_width = wcwidth(codepoint);
     const bool cursor_in_last_column = cursor_col == right_margin - 1;
-    emulator->last_codepoint = codepoint;
-    if (term_mode.USE_G0 ? term_mode.G0 : term_mode.G1) {
-        switch (codepoint) {
-            case '_':
-                codepoint = L' '; // Blank.
-                break;
-            case '`':
-                codepoint = L'◆'; // Diamond.
-                break;
-            case '0':
-                codepoint = L'█'; // Solid block;
-                break;
-            case 'a':
-                codepoint = L'▒'; // Checker board.
-                break;
-            case 'b':
-                codepoint = L'␉'; // Horizontal tab.
-                break;
-            case 'c':
-                codepoint = L'␌'; // Form feed.
-                break;
-            case 'd':
-                codepoint = L'\r'; // Carriage return.
-                break;
-            case 'e':
-                codepoint = L'␊'; // Linefeed.
-                break;
-            case 'f':
-                codepoint = L'°'; // Degree.
-                break;
-            case 'g':
-                codepoint = L'±'; // Plus-minus.
-                break;
-            case 'h':
-                codepoint = L'\n'; // Newline.
-                break;
-            case 'i':
-                codepoint = L'␋'; // Vertical tab.
-                break;
-            case 'j':
-                codepoint = L'┘'; // Lower right corner.
-                break;
-            case 'k':
-                codepoint = L'┐'; // Upper right corner.
-                break;
-            case 'l':
-                codepoint = L'┌'; // Upper left corner.
-                break;
-            case 'm':
-                codepoint = L'└'; // Left left corner.
-                break;
-            case 'n':
-                codepoint = L'┼'; // Crossing lines.
-                break;
-            case 'o':
-                codepoint = L'⎺'; // Horizontal line - scan 1.
-                break;
-            case 'p':
-                codepoint = L'⎻'; // Horizontal line - scan 3.
-                break;
-            case 'q':
-                codepoint = L'─'; // Horizontal line - scan 5.
-                break;
-            case 'r':
-                codepoint = L'⎼'; // Horizontal line - scan 7.
-                break;
-            case 's':
-                codepoint = L'⎽'; // Horizontal line - scan 9.
-                break;
-            case 't':
-                codepoint = L'├'; // T facing rightwards.
-                break;
-            case 'u':
-                codepoint = L'┤'; // T facing leftwards.
-                break;
-            case 'v':
-                codepoint = L'┴'; // T facing upwards.
-                break;
-            case 'w':
-                codepoint = L'┬'; // T facing downwards.
-                break;
-            case 'x':
-                codepoint = L'│'; // Vertical line.
-                break;
-            case 'y':
-                codepoint = L'≤'; // Less than or equal to.
-                break;
-            case 'z':
-                codepoint = L'≥'; // Greater than or equal to.
-                break;
-            case '{':
-                codepoint = L'π'; // Pi.
-                break;
-            case '|':
-                codepoint = L'≠'; // Not equal to.
-                break;
-            case '}':
-                codepoint = L'£'; // UK pound.
-                break;
-            case '~':
-                codepoint = L'·'; // Centered dot.
-                break;
-            default:
-                break;
-        }
-    }
-    if (autowrap) {
+
+    emulator->_last_codepoint = codepoint;
+    if (term_mode.USE_G0 ? term_mode.G0 : term_mode.G1) codepoint = map_search(codepoint, codepoint, table, 33);
+    if (decset_bit.AUTOWRAP) {
         if (cursor_in_last_column && ((about_to_autowrap && 1 == display_width) || 2 == display_width)) {
-            emulator->screen->lines[cursor_row][cursor_col].style.effect.AUTO_WRAPPED = true;
+            screen->lines[cursor_row][cursor_col].style.effect.AUTO_WRAPPED = true;
             cursor_col = left_margin;
             if (cursor_row + 1 < bottom_margin)cursor_row++;
-            else scroll_down_one_line(emulator);
+            else scroll_down(emulator, 1);
         }
     } else if (cursor_in_last_column && display_width == 2) return;
     if (emulator->MODE_INSERT && 0 < display_width) {
         const int dest_col = cursor_col + display_width;
         if (dest_col < right_margin)
-            block_copy(emulator->screen, cursor_col, cursor_row, right_margin - dest_col, 1, dest_col, cursor_row);
+            block_copy(screen, cursor_col, cursor_row, right_margin - dest_col, 1, dest_col, cursor_row);
     }
-    emulator->screen->lines[cursor_row][cursor_col - (0 >= display_width && about_to_autowrap)] = (Glyph) {.code=codepoint, .style= cursor_style};
-    if (autowrap && 0 < display_width) {
-        about_to_autowrap = (cursor_col == (right_margin - display_width));
-    }
+
+    set_char(codepoint, cursor_col - (0 >= display_width && about_to_autowrap), cursor_row);
+
+    if (decset_bit.AUTOWRAP && 0 < display_width) about_to_autowrap = (cursor_col == (right_margin - display_width));
+
     cursor_col = MIN(cursor_col + display_width, right_margin - 1);
 }
 
 static void save_cursor(Term_emulator *restrict const emulator) {
-    if (emulator->screen == &emulator->alt)
-        emulator->saved_state_alt = emulator->cursor;
-    else emulator->saved_state = emulator->cursor;
+    if (screen == &emulator->_alt)
+        emulator->_saved_state_alt = emulator->cursor;
+    else emulator->_saved_state = emulator->cursor;
 }
 
-#define restore_cursor() emulator->cursor = (emulator->screen == &emulator->alt) ? emulator->saved_state_alt : emulator->saved_state;
+#define restore_cursor() emulator->cursor = (screen == &emulator->_alt) ? emulator->_saved_state_alt : emulator->_saved_state;
 
-#define block_clear(sx, sy, w, h) block_set(emulator->screen, sx, sy, w, h, (Glyph) { cursor_style,' '})
+#define block_clear(sx, sy, w, h) block_set(screen, sx, sy, w, h, (Glyph) { cursor_style,' '})
 
-#define clear_transcript() block_set(&emulator->main, 0, 0, COLUMNS, TRANSCRIPT_ROW, (Glyph) {.code=' ',.style= NORMAL})
+#define clear_transcript() block_set(&emulator->_main, 0, 0, COLUMNS, TRANSCRIPT_ROWS, (Glyph) {.code=' ',.style= NORMAL}); \
+                           emulator->_main.history_rows=0;
 
 static void set_cursor_position_origin_mode(Term_emulator *restrict const emulator, int x, int y) {
     bool origin_mode = decset_bit.ORIGIN_MODE;
@@ -505,41 +417,43 @@ static void set_cursor_row_col(Term_emulator *restrict const emulator, int x, in
 }
 
 static int getArg(Term_emulator *restrict const emulator, int index, int default_value, bool treat_zero_as_default) {
-    int result = emulator->csi.arg[index];
+    int result = emulator->_csi.arg[index];
     if (0 > result || (0 == result && treat_zero_as_default)) result = default_value;
     return result;
 }
 
 static int next_tab_stop(Term_emulator *restrict const emulator, int num_tabs) {
     for (int i = cursor_col + 1; i < COLUMNS; i++)
-        if (emulator->tabStop & (1 << i) && (0 == --num_tabs)) return MIN(i, right_margin);
+        if (emulator->_tabStop[i / 8] & (1 << (i & 7)) && (0 == --num_tabs)) return MIN(i, right_margin);
 
     return right_margin - 1;
 }
 
-static void parse_arg(Term_emulator *restrict const emulator, int input_byte) {
-    if (BETWEEN(input_byte, '0', '9')) {
-        if (emulator->csi.index < MAX_ESCAPE_PARAMETERS) {
-            int old_value = emulator->csi.arg[emulator->csi.index];
-            int this_digit = input_byte - '0';
-            old_value = (0 < old_value) ? (old_value * 10) + this_digit : this_digit;
-            if (old_value > 9999)old_value = 9999;
-            emulator->csi.arg[emulator->csi.index] = (short) old_value;
-        }
-        continue_sequence(emulator->csi.state)
-    } else if (';' == input_byte) {
-        if (emulator->csi.index < MAX_ESCAPE_PARAMETERS) emulator->csi.index++;
-        continue_sequence(emulator->csi.state)
-    } else
-        finishSequence;
+static void parse_arg(Term_emulator *restrict const emulator, wchar_t input_byte) {
+    switch (input_byte) {
+        case '0'...'9':
+            if (emulator->_csi.index < MAX_ESCAPE_PARAMETERS) {
+                unsigned int old_value = emulator->_csi.arg[emulator->_csi.index];
+                const unsigned int this_digit = input_byte - '0';
+                old_value = (0 < old_value) ? (old_value * 10) + this_digit : this_digit;
+                if (old_value > 9999)old_value = 9999;
+                emulator->_csi.arg[emulator->_csi.index] = (short) old_value;
+            }
+            continue_sequence(emulator->_csi.state)
+            break;
+        case ';':
+            if (emulator->_csi.index < MAX_ESCAPE_PARAMETERS) emulator->_csi.index++;
+            continue_sequence(emulator->_csi.state)
+            break;
+        default:
+            finishSequence;
+            break;
+    }
 }
 
 static void do_dec_set_or_reset(Term_emulator *restrict const emulator, bool setting, int external_bit) {
 
     switch (external_bit) {
-        default:
-            finishSequence;
-            break;
         case 1 :
             decset_bit.APPLICATION_CURSOR_KEYS = setting;
             break;
@@ -607,33 +521,33 @@ static void do_dec_set_or_reset(Term_emulator *restrict const emulator, bool set
         case 47:
         case 1047:
         case 1049: {
-            Term_buffer *new_screen = setting ? &emulator->alt : &emulator->main;
-            if (new_screen != emulator->screen) {
+            Term_buffer *new_screen = setting ? &emulator->_alt : &emulator->_main;
+            if (new_screen != screen) {
                 if (setting) save_cursor(emulator);
                 else
                     restore_cursor()
-                if (new_screen == &emulator->alt) block_set(new_screen, 0, 0, COLUMNS, ROWS, (Glyph) {.code=' ', .style= cursor_style});
+                if (new_screen == &emulator->_alt) block_set(new_screen, 0, 0, COLUMNS, ROWS, (Glyph) {.code=' ', .style= cursor_style});
             }
         }
             break;
         case 2004 :
             decset_bit.BRACKETED_PASTE_MODE = setting;
             break;
+        default:
+            finishSequence;
+            break;
     }
 }
 
-static void process_codepoint(Term_emulator *restrict const emulator, int_least32_t codepoint) {
+__attribute__((hot)) static void process_codepoint(Term_emulator *restrict const emulator, wchar_t codepoint) {
 
     switch (codepoint) {
         case 0:
             break;
-        case 7:
-            if (esc_state == ESC_OSC) do_osc_set_text_parameters(emulator, "\007");
-            break;
         case 8:
             if (left_margin == cursor_col) {
                 const int prev_row = cursor_row - 1;
-                text_effect *effect_bit = &emulator->screen->lines[prev_row][right_margin - 1].style.effect;
+                text_effect *effect_bit = &screen->lines[prev_row][right_margin - 1].style.effect;
                 if (0 <= prev_row && effect_bit->AUTO_WRAPPED) {
                     effect_bit->AUTO_WRAPPED = false;
                     set_cursor_row_col(emulator, prev_row, right_margin - 1);
@@ -678,13 +592,13 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                     break;
                 default:
                     esc_state = ESC;
-                    emulator->csi.index = 0;
-                    memset(emulator->csi.arg, -1, MAX_ESCAPE_PARAMETERS);
+                    emulator->_csi.index = 0;
+                    memset(emulator->_csi.arg, -1, MAX_ESCAPE_PARAMETERS);
                     break;
             }
             break;
         default: {
-            emulator->csi.dontContinueSequence = true;
+            emulator->_csi.dontContinueSequence = true;
             switch (esc_state) {
                 case ESC_APC_ESCAPE:
                     if (codepoint == '\\') finishSequence;
@@ -705,9 +619,8 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             if (cursor_col > left_margin)cursor_col--;
                             else {
                                 const int rows = bottom_margin - top_margin;
-                                block_copy(emulator->screen, left_margin, top_margin, right_margin - left_margin - 1, rows, left_margin + 1,
-                                           top_margin);
-                                block_set(emulator->screen, right_margin - 1, top_margin, 1, rows,
+                                block_copy(screen, left_margin, top_margin, right_margin - left_margin - 1, rows, left_margin + 1, top_margin);
+                                block_set(screen, right_margin - 1, top_margin, 1, rows,
                                           (Glyph) {.code=' ', .style={cursor_style.fg, cursor_style.bg, {0}}});
                             }
                             break;
@@ -721,15 +634,14 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             if (cursor_col < right_margin - 1)cursor_col++;
                             else {
                                 const int rows = bottom_margin - top_margin;
-                                block_copy(emulator->screen, left_margin + 1, top_margin, right_margin - left_margin - 1, rows, left_margin,
-                                           top_margin);
-                                block_set(emulator->screen, right_margin - 1, top_margin, 1, rows,
+                                block_copy(screen, left_margin + 1, top_margin, right_margin - left_margin - 1, rows, left_margin, top_margin);
+                                block_set(screen, right_margin - 1, top_margin, 1, rows,
                                           (Glyph) {.code=' ', .style= {cursor_style.fg, cursor_style.bg, {0}}});
                             }
                             break;
                         case 'c':
                             reset_emulator(emulator);
-                            clear_transcript();
+                            clear_transcript()
                             block_clear(0, 0, COLUMNS, ROWS);
                             set_cursor_position_origin_mode(emulator, 0, 0);
                             break;
@@ -745,11 +657,11 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             set_cursor_row_col(emulator, 0, bottom_margin - 1);
                             break;
                         case 'H':
-                            emulator->tabStop |= true << cursor_col;
+                            emulator->_tabStop[cursor_col / 8] |= true << (cursor_col & 7);
                             break;
                         case 'M':
                             if (cursor_row <= top_margin) {
-                                block_copy(emulator->screen, 0, top_margin, COLUMNS, bottom_margin - top_margin - 1, 0, top_margin + 1);
+                                block_copy(screen, 0, top_margin, COLUMNS, bottom_margin - top_margin - 1, 0, top_margin + 1);
                                 block_clear(0, top_margin, COLUMNS, 1);
                             } else
                                 cursor_row--;
@@ -758,7 +670,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                         case '0':
                             break;
                         case 'P':
-                            emulator->osc.len = 0;
+                            emulator->_osc.len = 0;
                             continue_sequence(ESC_P)
                             break;
                         case '[': continue_sequence(ESC_CSI)
@@ -767,7 +679,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             decset_bit.APPLICATION_KEYPAD = true;
                             break;
                         case ']':
-                            emulator->osc.len = 0;
+                            emulator->_osc.len = 0;
                             continue_sequence(ESC_OSC)
                             break;
                         case '>':
@@ -779,7 +691,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                     }
                     break;
                 case ESC_POUND:
-                    if ('8' == codepoint) block_set(emulator->screen, 0, 0, COLUMNS, ROWS, (Glyph) {.code='E', .style= cursor_style});
+                    if ('8' == codepoint) block_set(screen, 0, 0, COLUMNS, ROWS, (Glyph) {.code='E', .style= cursor_style});
                     else
                         finishSequence;
                     break;
@@ -807,7 +719,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             const int spaces_to_insert = MIN(arg, columns_after_cursor);
                             const int chars_to_move = columns_after_cursor - spaces_to_insert;
                             about_to_autowrap = false;
-                            block_copy(emulator->screen, cursor_col, cursor_row, chars_to_move, 1, cursor_col + spaces_to_insert, cursor_row);
+                            block_copy(screen, cursor_col, cursor_row, chars_to_move, 1, cursor_col + spaces_to_insert, cursor_row);
                             block_clear(cursor_col, cursor_row, spaces_to_insert, 1);
                         }
                             break;
@@ -843,7 +755,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             set_cursor_position_origin_mode(emulator, 0, cursor_row - getArg(emulator, 0, 1, 1));
                             break;
                         case 'G': {
-                            const int arg = emulator->csi.arg[0];
+                            const int arg = emulator->_csi.arg[0];
                             cursor_col = LIMIT(arg, 1, COLUMNS);
                             about_to_autowrap = false;
                         }
@@ -871,7 +783,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                     block_clear(0, 0, COLUMNS, ROWS);
                                     break;
                                 case 3:
-                                    clear_transcript();
+                                clear_transcript()
                                     break;
                                 default:
                                     finishSequence;
@@ -905,7 +817,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             const int lines_after_cursor = bottom_margin - cursor_row;
                             const int lines_to_insert = MIN(arg, lines_after_cursor);
                             const int lines_to_move = lines_after_cursor - lines_to_insert;
-                            block_copy(emulator->screen, 0, cursor_row, COLUMNS, lines_to_move, 0, cursor_row + lines_to_insert);
+                            block_copy(screen, 0, cursor_row, COLUMNS, lines_to_move, 0, cursor_row + lines_to_insert);
                             block_clear(0, cursor_row + lines_to_move, COLUMNS, lines_to_insert);
                         }
                             break;
@@ -915,7 +827,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             const int lines_to_delete = MIN(arg, lines_after_cursor);
                             const int lines_to_move = lines_after_cursor - lines_to_delete;
                             about_to_autowrap = false;
-                            block_copy(emulator->screen, 0, cursor_row + lines_to_delete, COLUMNS, lines_to_move, 0, cursor_row);
+                            block_copy(screen, 0, cursor_row + lines_to_delete, COLUMNS, lines_to_move, 0, cursor_row);
                             block_clear(0, cursor_row + lines_to_move, COLUMNS, lines_to_delete);
                         }
                             break;
@@ -925,21 +837,19 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             const int cells_to_delete = MIN(arg, cells_after_cursor);
                             const int cells_to_move = cells_after_cursor - cells_to_delete;
                             about_to_autowrap = false;
-                            block_copy(emulator->screen, cursor_col + cells_to_delete, cursor_row, cells_to_move, 1, cursor_col, cursor_row);
+                            block_copy(screen, cursor_col + cells_to_delete, cursor_row, cells_to_move, 1, cursor_col, cursor_row);
                             block_clear(cursor_col + cells_to_move, cursor_row, cells_to_delete, 1);
                         }
                             break;
-                        case 'S': {
-                            const int lines_to_scroll = getArg(emulator, 0, 1, 1);
-                            for (int i = 0; i < lines_to_scroll; i++) scroll_down_one_line(emulator);
-                        }
+                        case 'S':
+                            scroll_down(emulator, getArg(emulator, 0, 1, 1));
                             break;
                         case 'T':
-                            if (0 == emulator->csi.index) {
+                            if (0 == emulator->_csi.index) {
                                 const int lines_to_scroll_arg = getArg(emulator, 0, 1, 1);
                                 const int lines_between_top_bottom_margin = bottom_margin - top_margin;
                                 const int lines_to_scroll = MIN(lines_between_top_bottom_margin, lines_to_scroll_arg);
-                                block_copy(emulator->screen, 0, top_margin, COLUMNS, lines_between_top_bottom_margin - lines_to_scroll, 0,
+                                block_copy(screen, 0, top_margin, COLUMNS, lines_between_top_bottom_margin - lines_to_scroll, 0,
                                            top_margin + lines_to_scroll);
                                 block_clear(0, top_margin, COLUMNS, lines_to_scroll);
                             } else { finishSequence; }
@@ -947,8 +857,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                         case 'X': {
                             const int arg = getArg(emulator, 0, 1, 1);
                             about_to_autowrap = false;
-                            block_set(emulator->screen, cursor_col, cursor_row, MIN(arg, COLUMNS - cursor_col), 1,
-                                      (Glyph) {.code=' ', .style= cursor_style});
+                            block_set(screen, cursor_col, cursor_row, MIN(arg, COLUMNS - cursor_col), 1, (Glyph) {.code=' ', .style= cursor_style});
                         }
                             break;
                         case 'Z': {
@@ -970,15 +879,15 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             set_cursor_position_origin_mode(emulator, getArg(emulator, 0, 1, 1) - 1, cursor_row);
                             break;
                         case 'b':
-                            if (-1 != emulator->last_codepoint) {
+                            if ((unsigned) -1 != emulator->_last_codepoint) {
                                 int num_repeat = getArg(emulator, 0, 1, 1);
                                 while (0 < num_repeat--)
-                                    emit_codepoint(emulator, emulator->last_codepoint);
+                                    emit_codepoint(emulator, emulator->_last_codepoint);
                             }
 
                             break;
                         case 'c':
-                            if (0 == getArg(emulator, 0, 0, 1)) write(emulator->fd, "\033[?64;1;2;6;9;15;18;21;22c", 26);
+                            if (0 == getArg(emulator, 0, 0, 1)) write(FD, "\033[?64;1;2;6;9;15;18;21;22c", 26);
                             break;
                         case 'd': {
                             const int arg = getArg(emulator, 0, 1, 1);
@@ -995,10 +904,10 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                 default:
                                     break;
                                 case 0:
-                                    emulator->tabStop &= ~(1 << cursor_col);
+                                    emulator->_tabStop[cursor_col / 8] &= ~(1 << (cursor_col & 7));
                                     break;
                                 case 3:
-                                    emulator->tabStop = 0;
+                                    memset(emulator->_tabStop, 0, CELI(COLUMNS, 8));
                                     break;
                             }
                         }
@@ -1019,11 +928,11 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                         }
                             break;
                         case 'm'://GRAPHIC RENDITION
-                            if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS) emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
-                            for (int i = 0; i < emulator->csi.index; i++) {
-                                int code = emulator->csi.arg[i];
+                            if (emulator->_csi.index >= MAX_ESCAPE_PARAMETERS) emulator->_csi.index = MAX_ESCAPE_PARAMETERS - 1;
+                            for (int i = 0; i < emulator->_csi.index; i++) {
+                                int code = emulator->_csi.arg[i];
                                 if (0 > code) {
-                                    if (0 < emulator->csi.index)continue;
+                                    if (0 < emulator->_csi.index)continue;
                                     else code = 0;
                                 }
                                 switch (code) {
@@ -1076,49 +985,44 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                     case 29:
                                         cursor_style.effect.STRIKETHROUGH = 0;
                                         break;
+                                    case 30 ... 37:
+                                        cursor_style.fg.index = (uint8_t) (code - 30);
+                                        break;
                                     case 38:
                                     case 48: {
-                                        const int first_arg = emulator->csi.arg[i + 1];
-                                        if (i + 2 > emulator->csi.index) continue;
+                                        const int first_arg = emulator->_csi.arg[i + 1];
+                                        if (i + 2 > emulator->_csi.index) continue;
                                         switch (first_arg) {
                                             case 2:
-                                                if (i + 4 <= emulator->csi.index) {
-                                                    unsigned int red = emulator->csi.arg[i + 2];
-                                                    unsigned int green = emulator->csi.arg[i + 3];
-                                                    unsigned int blue = emulator->csi.arg[i + 4];
+                                                if (i + 4 <= emulator->_csi.index) {
+                                                    unsigned int red = emulator->_csi.arg[i + 2];
+                                                    unsigned int green = emulator->_csi.arg[i + 3];
+                                                    unsigned int blue = emulator->_csi.arg[i + 4];
                                                     if (255 < red || 255 < green || 255 < blue)
                                                         finishSequence;
                                                     else {
-                                                        switch (code) {
-                                                            case 38:
-                                                                cursor_style.fg = (union color) {{(uint8_t) red, (uint8_t) green, (uint8_t) blue}};
-                                                                cursor_style.effect.TURE_COLOR_FG = true;
-                                                                break;
-                                                            case 48:
-                                                                cursor_style.bg = (union color) {{(uint8_t) red, (uint8_t) green, (uint8_t) blue}};
-                                                                cursor_style.effect.TURE_COLOR_BG = true;
-                                                                break;
-                                                            default:
-                                                                break;
+
+                                                        if (code == 38) {
+                                                            cursor_style.fg = (union color) {{(uint8_t) red, (uint8_t) green, (uint8_t) blue}};
+                                                            cursor_style.effect.TURE_COLOR_FG = true;
+                                                        } else {
+                                                            cursor_style.bg = (union color) {{(uint8_t) red, (uint8_t) green, (uint8_t) blue}};
+                                                            cursor_style.effect.TURE_COLOR_BG = true;
                                                         }
+
                                                     }
                                                     i += 4;
                                                 }
                                                 break;
                                             case 5: {
-                                                int color = emulator->csi.arg[i + 2];
+                                                int color = emulator->_csi.arg[i + 2];
                                                 i += 2;
                                                 if (BETWEEN(color, 0, NUM_INDEXED_COLORS)) {
-                                                    switch (code) {
-                                                        case 38:
-                                                            cursor_style.fg.index = (uint8_t) color;
-                                                            break;
-                                                        case 48:
-                                                            cursor_style.bg.index = (uint8_t) color;
-                                                            break;
-                                                        default:
-                                                            break;
-                                                    }
+                                                    if (code == 38)
+                                                        cursor_style.fg.index = (uint8_t) color;
+                                                    else
+                                                        cursor_style.bg.index = (uint8_t) color;
+
                                                 }
                                             }
                                                 break;
@@ -1131,36 +1035,41 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                     case 39:
                                         cursor_style.fg.index = COLOR_INDEX_FOREGROUND;
                                         break;
+                                    case 40 ... 47:
+                                        cursor_style.bg.index = (uint8_t) (code - 40);
+                                        break;
                                     case 49:
                                         cursor_style.bg.index = COLOR_INDEX_BACKGROUND;
                                         break;
+                                    case 90 ... 97:
+                                        cursor_style.fg.index = (uint8_t) (code - 90 + 8);
+                                        break;
+                                    case 100 ... 107:
+                                        cursor_style.bg.index = (uint8_t) (code - 100 + 8);
+                                        break;
                                     default:
-                                        if (BETWEEN(code, 30, 37)) cursor_style.fg.index = (uint8_t) (code - 30);
-                                        else if (BETWEEN(code, 40, 47)) cursor_style.bg.index = (uint8_t) (code - 40);
-                                        else if (BETWEEN(code, 90, 97)) cursor_style.fg.index = (uint8_t) (code - 90 + 8);
-                                        else if (BETWEEN(code, 100, 107)) cursor_style.bg.index = (uint8_t) (code - 100 + 8);
                                         break;
                                 }
                             }
                             break;
                         case 'n': {
-                            int arg = emulator->csi.arg[0];
+                            int arg = emulator->_csi.arg[0];
                             switch (arg) {
                                 default:
                                     break;
                                 case 5: {
                                     char bytes[] = {27, '[', '0', 'n'};
-                                    write(emulator->fd, bytes, 4);
+                                    write(FD, bytes, 4);
                                 }
                                     break;
                                 case 6:
-                                    dprintf(emulator->fd, "\033[%d;%dR", cursor_row + 1, cursor_col + 1);
+                                    dprintf(FD, "\033[%d;%dR", cursor_row + 1, cursor_col + 1);
                                     break;
                             }
                         }
                             break;
                         case 'r': {
-                            const int arg0 = emulator->csi.arg[0] - 1, arg1 = emulator->csi.arg[1];
+                            const int arg0 = emulator->_csi.arg[0] - 1, arg1 = emulator->_csi.arg[1];
                             top_margin = LIMIT(arg0, 0, ROWS - 2);
                             bottom_margin = LIMIT(arg1, top_margin + 2, ROWS);
                             set_cursor_position_origin_mode(emulator, 0, 0);
@@ -1168,37 +1077,37 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             break;
                         case 's':
                             if (decset_bit.LEFTRIGHT_MARGIN_MODE) {
-                                int arg0 = emulator->csi.arg[0] - 1, arg1 = emulator->csi.arg[1];
+                                int arg0 = emulator->_csi.arg[0] - 1, arg1 = emulator->_csi.arg[1];
                                 left_margin = LIMIT(arg0, 0, COLUMNS - 2);
                                 right_margin = LIMIT(arg1, left_margin + 1, COLUMNS);
                                 set_cursor_position_origin_mode(emulator, 0, 0);
                             } else save_cursor(emulator);
                             break;
                         case 't': {
-                            int arg = emulator->csi.arg[0];
+                            int arg = emulator->_csi.arg[0];
                             switch (arg) {
                                 default:
                                     break;
                                 case 11:
-                                    write(emulator->fd, "\033[1t", 4);
+                                    write(FD, "\033[1t", 4);
                                     break;
                                 case 13:
-                                    write(emulator->fd, "\033[3;0;0t", 8);
+                                    write(FD, "\033[3;0;0t", 8);
                                     break;
                                 case 14:
-                                    dprintf(emulator->fd, "\033[4;%d;%dt", ROWS * 12, COLUMNS * 12);
+                                    dprintf(FD, "\033[4;%d;%dt", ROWS * 12, COLUMNS * 12);
                                     break;
                                 case 18:
-                                    dprintf(emulator->fd, "\033[8;%d;%dt", ROWS, COLUMNS);
+                                    dprintf(FD, "\033[8;%d;%dt", ROWS, COLUMNS);
                                     break;
                                 case 19:
-                                    dprintf(emulator->fd, "\033[9;%d;%dt", ROWS, COLUMNS);
+                                    dprintf(FD, "\033[9;%d;%dt", ROWS, COLUMNS);
                                     break;
                                 case 20:
-                                    write(emulator->fd, "\033]LIconLabel\033\\", 14);
+                                    write(FD, "\033]LIconLabel\033\\", 14);
                                     break;
                                 case 21:
-                                    write(emulator->fd, "\033]l\033\\", 5);
+                                    write(FD, "\033]l\033\\", 5);
                                     break;
                             }
                         }
@@ -1252,8 +1161,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                     break;
                             }
                             for (int row = start_row; row < end_row; row++) {
-                                Glyph *const dst =
-                                        emulator->screen->lines[(emulator->screen->first_row + row) % emulator->screen->total_rows] + start_col;
+                                Glyph *const dst = screen->lines[internal_row_buff(screen, row)] + start_col;
                                 for (int col = start_col; col < end_col; col++) {
                                     if (dst->style.effect.PROTECTED == 0)
                                         dst[col] = fill;
@@ -1264,27 +1172,27 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                         case 'h':
                         case 'l': {
                             bool setting = 'h' == codepoint;
-                            if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS)emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
-                            for (int i = 0; i < emulator->csi.index; i++)
-                                do_dec_set_or_reset(emulator, setting, emulator->csi.arg[i]);
+                            if (emulator->_csi.index >= MAX_ESCAPE_PARAMETERS)emulator->_csi.index = MAX_ESCAPE_PARAMETERS - 1;
+                            for (int i = 0; i < emulator->_csi.index; i++)
+                                do_dec_set_or_reset(emulator, setting, emulator->_csi.arg[i]);
                         }
                             break;
                         case 'n':
-                            if (6 == emulator->csi.arg[0])
-                                dprintf(emulator->fd, "\033[?%d;%d;1R", cursor_row + 1, cursor_col + 1);
+                            if (6 == emulator->_csi.arg[0])
+                                dprintf(FD, "\033[?%d;%d;1R", cursor_row + 1, cursor_col + 1);
                             else
                                 finishSequence;
                             break;
                         case 'r':
                         case 's':
-                            if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS) emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
+                            if (emulator->_csi.index >= MAX_ESCAPE_PARAMETERS) emulator->_csi.index = MAX_ESCAPE_PARAMETERS - 1;
                             for (int i = 0; i < MAX_ESCAPE_PARAMETERS; i++) {
-                                int external_bit = emulator->csi.arg[i];
+                                int external_bit = emulator->_csi.arg[i];
                                 int internal = map_decset_bit(external_bit);
                                 if ('s' == codepoint)
-                                    emulator->saved_decset |= internal;
+                                    emulator->_saved_decset |= internal;
                                 else
-                                    do_dec_set_or_reset(emulator, emulator->saved_decset & internal, external_bit);
+                                    do_dec_set_or_reset(emulator, emulator->_saved_decset & internal, external_bit);
                             }
                             break;
                         case '$': continue_sequence(ESC_CSI_QUESTIONMARK_ARG_DOLLAR)
@@ -1297,7 +1205,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                 case ESC_CSI_BIGGERTHAN:
                     switch (codepoint) {
                         case 'c':
-                            write(emulator->fd, "\033[>41;320;0c", 12);
+                            write(FD, "\033[>41;320;0c", 12);
                             break;
                         case 'm':
                             break;
@@ -1327,7 +1235,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             int dest_left = MIN(arg6, COLUMNS);
                             int height_to_copy = MIN(ROWS - dest_top, bottom_source - top_source);
                             int width_to_copy = MIN(COLUMNS - dest_left, right_source - left_source);
-                            block_copy(emulator->screen, left_source, top_source, width_to_copy, height_to_copy, dest_left, dest_top);
+                            block_copy(screen, left_source, top_source, width_to_copy, height_to_copy, dest_left, dest_top);
                         }
                             break;
                         case '{':
@@ -1347,8 +1255,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                 right = MIN(right, effective_right_margin);
                                 for (int row = top - 1; row < bottom; row++) {
                                     for (int col = left - 1; col < right; col++) {
-                                        Glyph *glyph1 =
-                                                emulator->screen->lines[(row + emulator->screen->first_row) % emulator->screen->total_rows] + col;
+                                        Glyph *const glyph1 = screen->lines[internal_row_buff(screen, row)] + col;
                                         if (!selective || glyph1->style.effect.PROTECTED == 0) {
                                             glyph1->code = fill_char;
                                             if (!keep_attributes) glyph1->style = cursor_style;
@@ -1371,14 +1278,14 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                 bottom = MIN(arg2, effective_bottom_margin - 1) + effective_top_margin;
                                 right = MIN(arg3, effective_right_margin - 1) + effective_left_margin;
                             }
-                            if (4 <= emulator->csi.index) {
+                            if (4 <= emulator->_csi.index) {
                                 bool set_or_clear;
                                 text_effect bits = {0};
                                 int arg;
-                                if (emulator->csi.index >= MAX_ESCAPE_PARAMETERS)emulator->csi.index = MAX_ESCAPE_PARAMETERS - 1;
-                                for (int i = 4; i < emulator->csi.index; i++) {
+                                if (emulator->_csi.index >= MAX_ESCAPE_PARAMETERS)emulator->_csi.index = MAX_ESCAPE_PARAMETERS - 1;
+                                for (int i = 4; i < emulator->_csi.index; i++) {
                                     set_or_clear = true;
-                                    arg = emulator->csi.arg[i];
+                                    arg = emulator->_csi.arg[i];
                                     switch (arg) {
                                         case 0:
                                             if (!reverse)set_or_clear = false;
@@ -1423,7 +1330,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                         int x;
                                         int end_of_line;
                                         for (int y = top; y < bottom; y++) {
-                                            line = emulator->screen->lines[(emulator->screen->first_row + y) % emulator->screen->total_rows];
+                                            line = screen->lines[internal_row_buff(screen, y)];
                                             x = decset_bit.RECTANGULAR_CHANGEATTRIBUTE || y == top ? left : effective_left_margin;
                                             end_of_line = decset_bit.RECTANGULAR_CHANGEATTRIBUTE || y + 1 == bottom ? right : effective_right_margin;
                                             for (; x < end_of_line; x++) {
@@ -1467,7 +1374,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             int arg = getArg(emulator, 0, 1, 1);
                             int columns_to_insert = MIN(arg, columns_after_cursor);
                             int columns_to_move = columns_after_cursor - columns_to_insert;
-                            block_copy(emulator->screen, cursor_col, 0, columns_to_move, ROWS, cursor_col, 0);
+                            block_copy(screen, cursor_col, 0, columns_to_move, ROWS, cursor_col, 0);
                             block_clear(cursor_col, 0, columns_to_insert, ROWS);
                         }
                             break;
@@ -1476,7 +1383,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             int arg = getArg(emulator, 0, 1, 1);
                             int columns_to_delete = MIN(arg, columns_after_cursor);
                             int columns_to_move = columns_after_cursor - columns_to_delete;
-                            block_copy(emulator->screen, cursor_col + columns_to_delete, 0, columns_to_move, ROWS, cursor_col, 0);
+                            block_copy(screen, cursor_col + columns_to_delete, 0, columns_to_move, ROWS, cursor_col, 0);
                         }
                             break;
                         default:
@@ -1487,27 +1394,20 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                 case ESC_PERCENT:
                     break;
                 case ESC_OSC:
-                    switch (codepoint) {
-                        case 7:
-                            do_osc_set_text_parameters(emulator, "\007");
-                            break;
-                        case 27: continue_sequence(ESC_OSC_ESC)
-                            break;
-                        default:
-                            if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
-                                emulator->osc.len += codepoint_to_utf8(codepoint, osc_arg + emulator->osc.len);
-                                continue_sequence(esc_state)
-                            } else
-                                finishSequence;
-                            break;
-                    }
+                    if (codepoint == 7) //Codepoint 27 handled at the beginning
+                        do_osc_set_text_parameters(emulator, "\007");
+                    else if (emulator->_osc.len < MAX_OSC_STRING_LENGTH - 4) {
+                        emulator->_osc.len += codepoint_to_utf(codepoint, osc_arg + emulator->_osc.len);
+                        continue_sequence(esc_state)
+                    } else
+                        finishSequence;
                     break;
                 case ESC_OSC_ESC:
                     if ('\\' == codepoint) do_osc_set_text_parameters(emulator, "\033\\");
                     else {
-                        if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
-                            osc_arg[emulator->osc.len++] = 27;
-                            emulator->osc.len += codepoint_to_utf8(codepoint, osc_arg + emulator->osc.len);
+                        if (emulator->_osc.len < MAX_OSC_STRING_LENGTH - 4) {
+                            osc_arg[emulator->_osc.len++] = 27;
+                            emulator->_osc.len += codepoint_to_utf(codepoint, osc_arg + emulator->_osc.len);
                             continue_sequence(esc_state)
                         } else
                             finishSequence;
@@ -1517,7 +1417,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                     //Device Control
                     if ('\\' == codepoint) {
                         if (strncmp(osc_arg, "$q", 2) == 0) {
-                            if (strncmp("$q\"p", osc_arg, 4) == 0) write(emulator->fd, "\033P1$r64;1\"p\033\\", 13);
+                            if (strncmp("$q\"p", osc_arg, 4) == 0) write(FD, "\033P1$r64;1\"p\033\\", 13);
                             else
                                 finishSequence;
                         } else if (strncmp(osc_arg, "+q", 2) == 0) {
@@ -1553,19 +1453,20 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                                                                               decset_bit.APPLICATION_CURSOR_KEYS, decset_bit.APPLICATION_KEYPAD);
 
                                     if (response_len == 0) {
-                                        write(emulator->fd, "\033P0+r", 5);
-                                        write(emulator->fd, dcs, len);
-                                        write(emulator->fd, "\033\\", 2);
+                                        write(FD, "\033P0+r", 5);
+                                        write(FD, dcs, len);
+                                        write(FD, "\033\\", 2);
                                     } else {
                                         char hex_encoder[2 * response_len];
                                         for (size_t i = 0; i < response_len; i++)
                                             sprintf(hex_encoder + 2 * i, "%02x", response[i]);
-                                        write(emulator->fd, "\033P1+r", 5);
-                                        write(emulator->fd, dcs, len);
-                                        write(emulator->fd, "=", 1);
-                                        write(emulator->fd, hex_encoder, len * 2);
-                                        write(emulator->fd, "\033\\", 2);
+                                        write(FD, "\033P1+r", 5);
+                                        write(FD, dcs, len);
+                                        write(FD, "=", 1);
+                                        write(FD, hex_encoder, response_len * 2);
+                                        write(FD, "\033\\", 2);
                                     }
+                                    free(response);
                                 }
                                 if (exit) break;
                                 dcs += len + 1;
@@ -1573,24 +1474,24 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                         }
                         finishSequence;
                     } else {
-                        if (emulator->osc.len < MAX_OSC_STRING_LENGTH) {
-                            emulator->osc.len = 0;
+                        if (emulator->_osc.len > MAX_OSC_STRING_LENGTH - 4) {
+                            emulator->_osc.len = 0;
                             finishSequence;
                         } else {
-                            emulator->osc.len += codepoint_to_utf8(codepoint, osc_arg + emulator->osc.len);
+                            emulator->_osc.len += codepoint_to_utf(codepoint, osc_arg + emulator->_osc.len);
                             continue_sequence(esc_state)
                         }
                     }
                     break;
                 case ESC_CSI_QUESTIONMARK_ARG_DOLLAR:
                     if ('p' == codepoint) {
-                        int mode = emulator->csi.arg[0];
+                        int mode = emulator->_csi.arg[0];
                         int value;
                         switch (mode) {
                             case 47:
                             case 1047:
                             case 1049:
-                                value = (emulator->screen == &emulator->alt) ? 1 : 2;
+                                value = (screen == &emulator->_alt) ? 1 : 2;
                                 break;
                             default: {
                                 int internal = map_decset_bit(mode);
@@ -1598,7 +1499,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                             }
                                 break;
                         }
-                        dprintf(emulator->fd, "\033[?%d;%d$y", mode, value);
+                        dprintf(FD, "\033[?%d;%d$y", mode, value);
                     } else
                         finishSequence;
                     break;
@@ -1635,7 +1536,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                     }
                     break;
                 case ESC_CSI_ARGS_ASTERIX: {
-                    int attribute_change_extent = emulator->csi.arg[0];
+                    int attribute_change_extent = emulator->_csi.arg[0];
                     if ('x' == codepoint && BETWEEN(attribute_change_extent, 0, 2))
                         decset_bit.RECTANGULAR_CHANGEATTRIBUTE = 2 == attribute_change_extent;
                     else
@@ -1645,7 +1546,7 @@ static void process_codepoint(Term_emulator *restrict const emulator, int_least3
                 default:
                     finishSequence;
             }
-            if (emulator->csi.dontContinueSequence) finishSequence;
+            if (emulator->_csi.dontContinueSequence) finishSequence;
         }
     }
 }
@@ -1674,13 +1575,14 @@ Term_emulator *new_term_emulator(const char *restrict const cmd) {
     pid = fork();
     if (pid > 0) {
         Term_emulator *restrict const emulator = calloc(1, sizeof(Term_emulator));
-        init_term_buffer(&emulator->main, TRANSCRIPT_ROW, COLUMNS);
-        init_term_buffer(&emulator->alt, ROWS, COLUMNS);
-        emulator->screen = &emulator->main;
-        emulator->last_codepoint = -1;
+        emulator->_tabStop = malloc(CELI(COLUMNS, 8) * sizeof(uint8_t));
+        init_term_buffer(&emulator->_main, TRANSCRIPT_ROWS, COLUMNS);
+        init_term_buffer(&emulator->_alt, ROWS, COLUMNS);
+        screen = &emulator->_main;
+        emulator->_last_codepoint = -1;
         reset_emulator(emulator);
         emulator->pid = pid;
-        emulator->fd = ptm;
+        FD = ptm;
         return emulator;
     } else {
         // Clear signals which the Android java process may have blocked:
@@ -1700,13 +1602,13 @@ Term_emulator *new_term_emulator(const char *restrict const cmd) {
         dup2(pts, 1);
         dup2(pts, 2);
 
-        self_dir = opendir("/proc/self/fd");
+        self_dir = opendir("/proc/self/FD");
         if (self_dir != NULL) {
             int self_dir_fd = dirfd(self_dir);
             struct dirent *entry;
             while ((entry = readdir(self_dir)) != NULL) {
-                int fd = atoi(entry->d_name); // NOLINT(*-err34-c)
-                if (fd > 2 && fd != self_dir_fd) close(fd);
+                int _fd = atoi(entry->d_name); // NOLINT(*-err34-c)
+                if (_fd > 2 && _fd != self_dir_fd) close(_fd);
             }
             closedir(self_dir);
         }
@@ -1726,61 +1628,37 @@ Term_emulator *new_term_emulator(const char *restrict const cmd) {
     }
 }
 
-void process_byte(Term_emulator *restrict const emulator, const unsigned char *restrict const buffer, const int read_len) {
-    for (int i = 0; i < read_len; i++) {
-        byte = buffer[i];
-        if (utf_buffer.to_follow > 0) {
-            if ((byte & 0b11000000) == 0b10000000) {
-                utf_buffer.buffer[utf_buffer.index++] = byte;
-                if (--utf_buffer.to_follow) {
-                    code_point = utf_buffer.buffer[0] & utf_byte_mask[utf_buffer.index];
-                    for (uint b = 1; b < utf_buffer.index; b++) code_point = (code_point << 6) | (utf_buffer.buffer[b] & 0b00111111);
-                    if (((code_point <= 0b1111111) && utf_buffer.index > 1) || (code_point < 0b11111111111 && utf_buffer.index > 2) ||
-                        (code_point < 0b1111111111111111 && utf_buffer.index > 3))
-                        code_point = UNICODE_REPLACEMENT_CHARACTER;
-                    utf_buffer.index = 0;
-                    if (code_point < 0x80 || code_point > 0x9F) {
-                        //TODO CHECK UNASSIGNED
-                        if (BETWEEN(code_point, 0xD800, 0xDFFF)) code_point = UNICODE_REPLACEMENT_CHARACTER;
-                        process_codepoint(emulator, code_point);
-                    }
-                }
-            } else {
-                utf_buffer.to_follow = utf_buffer.index = 0;
-                emit_codepoint(emulator, UNICODE_REPLACEMENT_CHARACTER);
-                goto parse_byte;
-            }
-        } else {
-            parse_byte:
-            if (byte < 128) {
-                process_codepoint(emulator, byte);
-                continue;
-            }
-            switch (byte >> 4) {
-                case 0b1100:
-                case 0b1101:
-                    utf_buffer.to_follow = 1;
-                    break;
-                case 0b1110:
-                    utf_buffer.to_follow = 2;
-                    break;
-                case 0b1111:
-                    utf_buffer.to_follow = 3;
-                    break;
-                default:
-                    process_codepoint(emulator, UNICODE_REPLACEMENT_CHARACTER);
-                    continue;
-            }
-            utf_buffer.buffer[utf_buffer.index++] = byte;
-        }
+#define BUFFER_SIZE 2048
 
-    }
+void read_data(Term_emulator *restrict const emulator) {
+
+    static unsigned char buffer[BUFFER_SIZE];
+    static int read_len;
+    static int write_len;
+    static uint8_t utf_buff_len = 0;
+    static wchar_t codepoint;
+    static uint8_t byte_len;
+    do {
+        read_len = read(FD, buffer + utf_buff_len, BUFFER_SIZE - utf_buff_len) + utf_buff_len;
+        utf_buff_len = 0;
+        for (write_len = 0; write_len < read_len;) {
+            DECODE_UTF8(buffer, write_len, read_len, codepoint, byte_len)
+            write_len += byte_len;
+            process_codepoint(emulator, codepoint);
+        }
+    } while (read_len == BUFFER_SIZE);
 }
 
 void destroy_term_emulator(Term_emulator *const emulator) {
-    close(emulator->fd);
-    destroy_term_buffer(&emulator->main);
-    destroy_term_buffer(&emulator->alt);
+    close(FD);
+    for (int i = 0; i < ROWS; i++) {
+        free(emulator->_main.lines[i]);
+        free(emulator->_alt.lines[i]);
+    }
+    for (int i = ROWS; i < TRANSCRIPT_ROWS; i++)free(emulator->_main.lines[i]);
+    free(emulator->_tabStop);
+    free(emulator->_main.lines);
+    free(emulator->_alt.lines);
     free(emulator);
 }
 

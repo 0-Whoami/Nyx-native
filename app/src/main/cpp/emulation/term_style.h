@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include "common/utils.h"
 
 
 #define COLOR_INDEX_FOREGROUND  15
@@ -43,7 +44,7 @@ typedef struct {
  * */
 typedef struct {
     glyph_style style;      //Style
-    uint_least32_t code;     //Character
+    wchar_t code;     //Character
 } Glyph;
 
 const glyph_style NORMAL = {.fg={.index=COLOR_INDEX_FOREGROUND}, .bg={.index=COLOR_INDEX_BACKGROUND}, .effect={0}};

@@ -7,20 +7,23 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
-public final class Main extends Activity {
+public class MainActivity extends Activity {
     static {
         System.loadLibrary("termux");
     }
 
+    native void init(Surface surface, AssetManager assetManager);
+
+    native void destroy();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        SurfaceView view = new SurfaceView(this);
-        setContentView(view);
-        view.getHolder().addCallback(new SurfaceHolder.Callback() {
+        SurfaceView surfaceView = new SurfaceView(this);
+        surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
-                init(holder.getSurface());
+                init(holder.getSurface(), getAssets());
             }
 
             @Override
@@ -30,10 +33,9 @@ public final class Main extends Activity {
 
             @Override
             public void surfaceDestroyed(SurfaceHolder holder) {
-
+                destroy();
             }
         });
+        setContentView(surfaceView);
     }
-    public native void init(Surface view);
-    public native void load_asset_manager(AssetManager assetManager);
 }
