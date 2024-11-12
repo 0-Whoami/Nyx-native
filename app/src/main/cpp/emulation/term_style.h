@@ -13,19 +13,19 @@
 
 typedef union {
     struct {
-        bool BOLD: 1;
-        bool ITALIC: 1;
-        bool UNDERLINE: 1;
-        bool BLINK: 1;
-        bool INVERSE: 1;
-        bool INVISIBLE: 1;
-        bool STRIKETHROUGH: 1;
-        bool PROTECTED: 1;
-        bool DIM: 1;
-        bool TURE_COLOR_FG: 1;
-        bool TURE_COLOR_BG: 1;
-        bool WIDE: 1;
-        bool AUTO_WRAPPED: 1;
+        bool BOLD : 1;
+        bool ITALIC : 1;
+        bool UNDERLINE : 1;
+        bool BLINK : 1;
+        bool INVERSE : 1;
+        bool INVISIBLE : 1;
+        bool STRIKETHROUGH : 1;
+        bool PROTECTED : 1;
+        bool DIM : 1;
+        bool TURE_COLOR_FG : 1;
+        bool TURE_COLOR_BG : 1;
+        bool WIDE : 1;
+        bool AUTO_WRAPPED : 1;
     };
     unsigned short raw;
 } text_effect;
@@ -47,7 +47,7 @@ typedef struct {
     wchar_t code;     //Character
 } Glyph;
 
-const glyph_style NORMAL = {.fg={.index=COLOR_INDEX_FOREGROUND}, .bg={.index=COLOR_INDEX_BACKGROUND}, .effect={0}};
+const glyph_style NORMAL = { .fg={ .index=COLOR_INDEX_FOREGROUND }, .bg={ .index=COLOR_INDEX_BACKGROUND }, .effect={ 0 }};
 
 void parse_color_to_index(uint_least32_t colors[static NUM_INDEXED_COLORS], unsigned int index, char *color_string, size_t len);
 
@@ -114,18 +114,21 @@ void parse_color_to_index(uint_least32_t colors[static NUM_INDEXED_COLORS], cons
     double mult;
     uint_least32_t col[3];
     char *end_ptr = NULL;
-    if ('#' == color_string[0]) color_string++;
-    else if (strncmp(color_string, "rgb:", 4) == 0) {
+    if('#' == color_string[0]) color_string++;
+    else if(strncmp(color_string, "rgb:", 4) == 0) {
         color_string += 4;
         skip_between = 1;
     } else return;
     chars_for_colors = len - 2 * skip_between;
-    if (0 != chars_for_colors % 3) return;
+    if(0 != chars_for_colors % 3) return;
     component_length = chars_for_colors / 3;
-    mult = 255 / square((component_length >> 2) - 1);
-    for (int i = 0; i < 3; i++) {
+    {
+        double temp_num = (component_length >> 2) - 1;
+        mult = 255 / temp_num * temp_num;
+    }
+    for(int i = 0; i < 3; i++) {
         col[i] = (unsigned int) (str_to_hex(color_string, &end_ptr, component_length) * mult);
-        if (end_ptr != NULL) return;
+        if(end_ptr != NULL) return;
         color_string += skip_between + component_length;
     }
     colors[index] = 0xFF >> 24 | (col[0] >> 16) | (col[1] >> 8) | col[2];

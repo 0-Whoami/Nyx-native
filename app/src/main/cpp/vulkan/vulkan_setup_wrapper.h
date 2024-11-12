@@ -10,8 +10,6 @@
 #include "common/utils.h"
 #include <malloc.h>
 
-#define DEBUG
-
 #ifdef DEBUG
 
 static VKAPI_ATTR VkBool32  VKAPI_CALL
@@ -59,7 +57,7 @@ static VkFramebuffer *framebuffer;
 
 static VkCommandPool commandPool;
 static VkCommandBuffer commandBuffer;
-static VkSemaphore image_acquire, text_bg, text_fg;
+static VkSemaphore image_acquire;
 
 const static VkCommandBufferBeginInfo commandBufferBeginInfo = { .sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 static VkRenderPassBeginInfo renderPassBeginInfo = { .sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -70,6 +68,7 @@ typedef struct {
     uint32_t *code;
     size_t length;
 } shader_info;
+
 typedef struct {
     struct ANativeWindow *window;
     shader_info vertex_shader, fragment_shader;
@@ -83,7 +82,11 @@ extern void end_drawing(void);
 
 extern void cleanup_vulkan(void);
 
+#ifdef DEBUG
+
 extern void test(void);
+
+#endif
 
 static void create_vk_shader(const uint32_t *code, size_t len, VkShaderModule *module) {
     VkShaderModuleCreateInfo shaderModuleCreateInfo = { .sType=VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize=len, .pCode=code };
@@ -117,7 +120,8 @@ void init_vulkan(Vulkan_init_info *info) {
 #ifdef DEBUG
 //Hooking validation layer
         {
-            PFN_vkCreateDebugReportCallbackEXT debugReportCallbackExt = (PFN_vkCreateDebugReportCallbackEXT) vkGetInstanceProcAddr(instance,"vkCreateDebugReportCallbackEXT");
+            PFN_vkCreateDebugReportCallbackEXT debugReportCallbackExt = (PFN_vkCreateDebugReportCallbackEXT) vkGetInstanceProcAddr(instance,
+                                                                                                                                   "vkCreateDebugReportCallbackEXT");
             if(debugReportCallbackExt) {
                 VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfoExt = { };
                 debugReportCallbackCreateInfoExt.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
@@ -374,8 +378,6 @@ void init_vulkan(Vulkan_init_info *info) {
     {
         const VkSemaphoreCreateInfo semaphoreCreateInfo = { .sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &image_acquire))
-        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &text_bg))
-        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &text_fg))
     }
 }
 
@@ -400,8 +402,6 @@ void end_drawing(void) {
 void cleanup_vulkan(void) {
     vkQueueWaitIdle(queue);
     vkDestroySemaphore(device, image_acquire, NULL);
-    vkDestroySemaphore(device, text_bg, NULL);
-    vkDestroySemaphore(device, text_fg, NULL);
 
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     vkDestroyCommandPool(device, commandPool, NULL);
@@ -429,6 +429,8 @@ void cleanup_vulkan(void) {
     vkDestroyInstance(instance, NULL);
 }
 
+#ifdef DEBUG
+
 void test(void) {
     start_drawing();
     {
@@ -442,4 +444,5 @@ void test(void) {
     end_drawing();
 }
 
+#endif
 #endif //NYX_VULKAN_SETUP_WRAPPER_H
