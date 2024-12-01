@@ -1,7 +1,9 @@
 package com.termux;
 
 import android.app.Activity;
+import android.app.NativeActivity;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -12,18 +14,20 @@ public class MainActivity extends Activity {
         System.loadLibrary("termux");
     }
 
-    native void init(Surface surface, AssetManager assetManager);
+    static native void init(Surface surface, AssetManager assetManager, Bitmap atlus);
 
-    native void destroy();
+    static native void destroy();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         SurfaceView surfaceView = new SurfaceView(this);
+        setContentView(surfaceView);
         surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
-                init(holder.getSurface(), getAssets());
+                Bitmap bitmap = Bitmap.createBitmap(10, 12, Bitmap.Config.ALPHA_8);
+                init(holder.getSurface(), getAssets(),null );
             }
 
             @Override
@@ -33,9 +37,15 @@ public class MainActivity extends Activity {
 
             @Override
             public void surfaceDestroyed(SurfaceHolder holder) {
-                destroy();
+
             }
         });
-        setContentView(surfaceView);
+
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        destroy();
     }
 }

@@ -5,7 +5,6 @@
 #ifndef NYX_TERM_INTERFACE_H
 #define NYX_TERM_INTERFACE_H
 
-#include "emulation/term_emulator.h"
 #include <sys/epoll.h>
 #include <pthread.h>
 #include <sys/wait.h>
@@ -17,13 +16,14 @@ static struct epoll_event event_que[MAX_TERM_SESSIONS];
 
 static int epoll_fd = -1;
 static pthread_t pthread;
-Term_emulator *sessions[MAX_TERM_SESSIONS];
+//Term_emulator *sessions[MAX_TERM_SESSIONS];
 
-int occupied_len;
+//int occupied_len;
 
 extern void init_terminal_session_manager(void);
 
 extern void add_term_session(const char *);
+/*
 
 static void cleanup(Term_emulator *const emulator) {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, FD, NULL);
@@ -75,5 +75,6 @@ void add_term_session(const char *const cmd) {
 }
 
 #define kill_term_session(index) kill(sessions[index]->pid,SIGTERM)
+*/
 
 #endif //NYX_TERM_INTERFACE_H

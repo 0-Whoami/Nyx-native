@@ -5,7 +5,7 @@ plugins {
 android {
     namespace 'com.termux'
     compileSdk 35
-    ndkVersion = '27.0.12077973'
+    ndkVersion = '28.0.12433566'
     lintOptions {
         abortOnError false
     }
@@ -25,7 +25,7 @@ android {
             abi {
                 enable(true)
                 reset()
-                include  'armeabi-v7a'
+                include 'armeabi-v7a'
                 universalApk false
             }
         }
@@ -33,7 +33,7 @@ android {
 
     externalNativeBuild {
         ndkBuild {
-            path 'src/main/cpp/Android.mk'
+            path 'src/main/jni/Android.mk'
         }
     }
 
@@ -49,8 +49,7 @@ android {
             crunchPngs true
             externalNativeBuild {
                 ndkBuild {
-                    cFlags '-std=c11',
-                            '-Wall',
+                    cFlags '-Wall',
                             '-Wextra',
                             '-Werror',
                             '-Ofast',
@@ -73,7 +72,8 @@ android {
                             '-mtune=cortex-a55',
                             '-mfpu=neon-vfpv4',
                             '-mfloat-abi=softfp',
-                            '-fomit-frame-pointer'
+                            '-fomit-frame-pointer',
+                            '-s'
                 }
             }
         }
