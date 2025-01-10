@@ -7,7 +7,7 @@
 #include "common/common.h"
 #include <malloc.h>
 #include <android/keycodes.h>
-#include "ext/input/key_handler.h"
+#include "core/key_handler.h"
 
 
 #define KEYMOD_ALT  (int)0x80000000

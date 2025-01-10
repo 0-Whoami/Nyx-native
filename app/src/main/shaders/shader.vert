@@ -1,11 +1,27 @@
 #version 450
+#define DIM 1 << 1
+#define INVISIBLE 1 << 6
 
-layout(set=0, binding=0) uniform Uniform_data{ vec2 vertex[4]; } ubo;
-layout(push_constant) uniform push_const{ vec2 offset;float texture_x; } push;
-layout(location = 0) out vec2 uv;
+layout(location=0) in vec2 vertex;
+layout(location = 1) in int packed_data;
+
+layout(location = 0) out vec2 texture_uv;
+layout(location = 1) out flat vec3 fg;
+layout(location = 2) out flat vec3 bg;
+layout(location = 3) out flat int style;
+
+layout(binding=0) uniform Info{
+    vec3 colors[256];
+    ivec2 row_col;
+    vec2 texture_rect;
+    vec2 offset;
+    float zoom;
+} ub;
 
 void main() {
-    vec2 pos=ubo.vertex[gl_VertexIndex];
-    gl_Position = vec4(pos+push.offset, 0.0, 1.0);
-    uv=vec2(pos.x+push.texture_x, pos.y);
+    int flags=packed_data&0xFF;
+    if ((flags&INVISIBLE)!=0) gl_Position=vec4(1e10, 1e10, 1e10, 1.0);//discard
+    fg=ub.colors[(packed_data>>8)&0xFF];
+    bg=ub.colors[(packed_data>>16)&0xFF];
+    gl_Position=vec4(0.0, 0.0, 0.0, 0.0);
 }

@@ -6,9 +6,6 @@ android {
     namespace 'com.termux'
     compileSdk 35
     ndkVersion = '28.0.12433566'
-    lintOptions {
-        abortOnError false
-    }
     buildToolsVersion '35.0.0'
     defaultConfig {
         applicationId "com.termux"
@@ -19,7 +16,7 @@ android {
         resourceConfigurations += ['en', 'xhdpi']
         versionNameSuffix '.wear'
         shaders {
-            glslcArgs.addAll(['-c', '-g'])
+            glslcArgs.addAll(['-c', '-g','-Werror'])
         }
         splits {
             abi {
@@ -93,6 +90,12 @@ android {
         resources {
             excludes += ['/META-INF/**']
         }
+    }
+    buildFeatures {
+        shaders true
+    }
+    lint {
+        abortOnError false
     }
     applicationVariants.configureEach { final variant ->
         variant.outputs.configureEach { final output ->
