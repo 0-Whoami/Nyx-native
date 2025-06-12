@@ -4,9 +4,9 @@ plugins {
 
 android {
     namespace 'com.termux'
-    compileSdk 35
-    ndkVersion = '28.0.12433566'
-    buildToolsVersion '35.0.0'
+    compileSdk 36
+    ndkVersion = '29.0.13113456'
+    buildToolsVersion '36.0.0'
     defaultConfig {
         applicationId "com.termux"
         minSdk 24
@@ -22,7 +22,7 @@ android {
             abi {
                 enable(true)
                 reset()
-                include 'armeabi-v7a'
+                include 'armeabi-v7a', 'x86_64'
                 universalApk false
             }
         }
@@ -64,11 +64,6 @@ android {
                             '-Rpass-missed=inlining',
                             '-Rpass-missed=loop-unroll',
                             '-flto',
-                            '-mthumb',
-                            '-march=armv7-a',
-                            '-mtune=cortex-a55',
-                            '-mfpu=neon-vfpv4',
-                            '-mfloat-abi=softfp',
                             '-fomit-frame-pointer',
                             '-s'
                 }

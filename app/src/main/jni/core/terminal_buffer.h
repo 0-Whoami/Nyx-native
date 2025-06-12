@@ -7,46 +7,31 @@
 
 #include "terminal.h"
 
-typedef struct {
-    void (*allocate_buffers)(terminal *const restrict);
+void allocate_buffers(const terminal *restrict);
 
-    void (*set_glyph)(terminal *const restrict);
+void set_glyph(const terminal *restrict);
 
-    void (*block_copy)(terminal *restrict const emulator, const i8 sx, const i8 sy, const i8 w, i8 h, const i8 dx, const i8 dy);
+void block_copy(const terminal *restrict emulator, i8 sx, i8 sy, i8 w, i8 h, i8 dx, i8 dy);
 
-    void (*block_set)(terminal *restrict const emulator, const i8 sx, const i8 sy, const i8 w, i8 h);
+void block_set(const terminal *restrict emulator, i8 sx, i8 sy, i8 w, i8 h);
 
-    void
-    (*block_set_attr)(terminal *restrict const emulator, const i8 sx, const i8 sy, const i8 w, const i8 h, bool not_selective,
-                      bool dont_keep_attribute);
+void
+block_set_attribute(const terminal *restrict emulator, i8 sx, i8 sy, i8 w, i8 h, bool not_selective, bool dont_keep_attribute);
 
-    void (*set_or_clear_effect)(terminal *restrict const emulator,
-                                const ui8 bits,
-                                const bool set,
-                                const bool reverse,
-                                const i8 top,
-                                const i8 bottom,
-                                const i8 left,
-                                const i8 right,
-                                const i8 right_margin,
-                                const i8 left_margin);
+void
+set_or_clear_effect(const terminal *restrict emulator, ui8 bits, bool set, bool reverse, i8 top, i8 bottom, i8 left, i8 right, i8 right_margin,
+                    i8 left_margin);
 
-    void (*scroll_down)(terminal *const restrict, i8);
+void scroll_down(terminal *restrict, i8);
 
-    void (*clear_transcript)(terminal *restrict const);
+void clear_transcript(const terminal *restrict);
 
-    void (*set_line_wrap)(terminal *const restrict, i8, bool);
+void set_line_wrap(const terminal *restrict, i8, bool);
 
-    bool (*get_line_wrap)(terminal *const restrict, i8);
+void switch_buffers(terminal *restrict);
 
-    void (*free_buffers)(terminal *const restrict);
-} buffer_operation;
+bool get_line_wrap(const terminal *restrict, i8);
 
-typedef struct {
-    Glyph *data;
-    ui8 *auto_wrapped_lines;
-} Terminal_buffer;
-
-extern buffer_operation BUFF_OP;
+void free_buffers(const terminal *restrict);
 
 #endif //NYX_TERMINAL_BUFFER_H

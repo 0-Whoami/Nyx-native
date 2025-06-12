@@ -30,8 +30,6 @@
 
 #define TAB_STOP emulator->tabStop
 
-#define COLORS emulator->colors
-
 #define CURSOR emulator->cursor
 #define CURSOR_COL CURSOR.x
 #define CURSOR_ROW CURSOR.y
@@ -50,10 +48,6 @@
 #define CSI_INDEX emulator->csi_index
 #define DO_NOT_CONTINUE_SEQUENCE get(emulator->esc_state,1<<7)
 #define SET_DO_NOT_CONTINUE_SEQUENCE set(emulator->esc_state,1<<7)
-
-#define MAIN_BUFF emulator->main
-#define ALT_BUFF emulator->alt
-#define SCREEN_BUFF emulator->screen_buff
 
 #define FD emulator->fd
 
@@ -75,8 +69,6 @@
 #define SET_MODE_INSERT_VAL(val) set_val(emulator->aShort,1<<14,val)
 
 #define SAVED_DECSET_BIT emulator->aShort
-#define ROWS emulator->rows
-#define COLUMNS emulator->columns
 
 const Glyph NORMAL = {.code=' ', .style={.fg=COLOR_INDEX_FOREGROUND, .bg=COLOR_INDEX_BACKGROUND}};
 
@@ -105,31 +97,6 @@ static ui8 str_to_hex_int8(const char *restrict const string, bool *err, i8 len)
     return result;
 }
 
-static void parse_color_to_index(vec3 *colors, const char *color_string, const i8 len) {
-    bool skip_between = 0;
-    i8 chars_for_colors, component_length;
-    ui8 col[3];
-    bool err = false;
-    double mult;
-    if ('#' == color_string[0]) color_string++;
-    else if (strncmp(color_string, "rgb:", 4) == 0) {
-        color_string += 4;
-        skip_between = 1;
-    } else return;
-    chars_for_colors = (i8) (len - 2 * skip_between);
-    if (0 != chars_for_colors % 3) return;
-    component_length = (i8) (chars_for_colors / 3);
-    {
-        double temp_num = (component_length >> 2) - 1;
-        mult = 255 / temp_num * temp_num;
-    }
-    for (int i = 0; i < 3; i++) {
-        col[i] = (ui8) (str_to_hex_int8(color_string, &err, component_length) * mult);
-        if (err) return;
-        color_string += skip_between + component_length;
-    }
-    *colors = (vec3) {(float) col[0] / 255.0f, (float) col[1] / 255.0f, (float) col[2] / 255.0f};
-}
 
 static int16_t map_decset_bit(int16_t bit) {
     switch (bit) {
@@ -162,14 +129,14 @@ static int16_t map_decset_bit(int16_t bit) {
     }
 }
 
-#define is_alt_buff_active() (SCREEN_BUFF==&ALT_BUFF)
+#define is_alt_buff_active() (emulator->aShort&(1<<13))
 #define finish_sequence() set_esc_state(ESC_NONE)
 #define continue_sequence(new_esc_state) (emulator->esc_state = new_esc_state)
 #define restore_cursor() emulator->cursor = (is_alt_buff_active()) ? SAVED_STATE_ALT :SAVED_STATE;
-#define block_clear(sx, sy, w, h) CURSOR_GLYPH.code=' ';BUFF_OP.block_set(emulator, sx, sy, w, h)
+#define block_clear(sx, sy, w, h) CURSOR_GLYPH.code=' ';block_set(emulator, sx, sy, w, h)
 
 
-#define block_copy_emu(sx, sy, w, h, dx, dy) BUFF_OP.block_copy(emulator,sx,sy,w,h,dx,dy)
+#define block_copy_emu(sx, sy, w, h, dx, dy) block_copy(emulator,sx,sy,w,h,dx,dy)
 
 static void reset_emulator(terminal *restrict const emulator) {
     CSI_INDEX = 0;
@@ -187,7 +154,6 @@ static void reset_emulator(terminal *restrict const emulator) {
     }
     set(DECSET_BIT, AUTOWRAP | CURSOR_ENABLED);
     SAVED_STATE = SAVED_STATE_ALT = (term_cursor) {.glyph=NORMAL, .decsetBit= emulator->cursor.decsetBit};
-    reset_all_color(COLORS);
 }
 
 static void save_cursor(terminal *restrict const emulator) {
@@ -221,96 +187,29 @@ static void do_osc_set_text_parameters(terminal *restrict const emulator, const 
     exit_loop:;
 
     switch (value) {
-        case 0:
-        case 1:
-        case 2:
-        case 119:
-            break;
-        case 4: {
-            int16_t color_index = -1;
-            int16_t parsing_pair_start = -1;
-            char b;
-            for (int16_t i = 0;; i++) {
-                end_of_input = i == len;
-                b = text_param[i];
-                if (end_of_input || ';' == b) {
-                    if (0 > parsing_pair_start) parsing_pair_start = (int16_t) (i + 1);
-                    else if (BETWEEN(color_index, 0, 255)) {
-                        parse_color_to_index(emulator->colors + color_index, text_param + parsing_pair_start,
-                                             (i8) (i - parsing_pair_start));
-                        color_index = parsing_pair_start = -1;
-                    } else {
-                        finish_sequence();
-                        return;
-                    }
-
-                } else if (0 > parsing_pair_start && BETWEEN(b, '0', '9'))
-                    color_index = (int16_t) ((0 < color_index ? 0 : color_index * 10) + (b - '0'));
-                else {
-                    finish_sequence();
-                    return;
-                }
-                if (end_of_input)break;
-            }
-        }
-            break;
         case 10:
         case 11:
-        case 12: {
-            ui8 special_index = (ui8) (COLOR_INDEX_FOREGROUND + value - 10);
-            int16_t last_semi_index = 0;
-            for (int16_t char_index = 0;; char_index++) {
-                end_of_input = char_index == len;
-                if (end_of_input || ';' == text_param[char_index]) {
-                    char *color_spec = text_param + last_semi_index;
-                    if ('?' == *color_spec) {
-                        const vec3 rgb = emulator->colors[special_index];
-                        dprintf(FD, "\033]%d;rgb:%04x/%04x/%04x%s", value, (uint) (255 * rgb.r), (uint) (255 * rgb.g), (uint) (255 * rgb.b),
-                                terminator);
-                    } else
-                        parse_color_to_index(emulator->colors + special_index, color_spec,
-                                             ((i8) (char_index - last_semi_index)));
-                    special_index++;
-                    if (end_of_input || COLOR_INDEX_CURSOR < special_index || ++char_index >= len) break;
-                    last_semi_index = char_index;
-                }
-            }
-        }
-            break;
+//        case 12: {
+//            ui8 special_index = (ui8) (COLOR_INDEX_FOREGROUND + value - 10);
+//            int16_t last_semi_index = 0;
+//            for (int16_t char_index = 0;; char_index++) {
+//                end_of_input = char_index == len;
+//                if (end_of_input || ';' == text_param[char_index]) {
+//                    char *color_spec = text_param + last_semi_index;
+//                    if ('?' == *color_spec) {
+//                        const vec3 rgb = emulator->colors[special_index];
+//                        dprintf(FD, "\033]%d;rgb:%04x/%04x/%04x%s", value, (uint) (255 * rgb.r), (uint) (255 * rgb.g), (uint) (255 * rgb.b),
+//                                terminator);
+//                    }
+//                    special_index++;
+//                    if (end_of_input || COLOR_INDEX_CURSOR < special_index || ++char_index >= len) break;
+//                    last_semi_index = char_index;
+//                }
+//            }
+//        }
+//            break;
         case 52:
             copy_base64_to_clipboard(strchr(text_param, ';'), len);
-            break;
-
-        case 104:
-            if (len == 0) reset_all_color(COLORS);
-            else {
-                int16_t last_index = 0;
-                for (int16_t char_index = 0;; char_index++) {
-                    end_of_input = char_index == len;
-                    if (end_of_input || ';' == text_param[char_index]) {
-                        int16_t char_len = (int16_t) (char_index - last_index);
-                        ui8 color_to_reset = 0;
-                        char *color_string = text_param + last_index, b;
-                        while (--char_len >= 0) {
-                            b = *color_string++;
-                            if (BETWEEN(b, '0', '9'))
-                                color_to_reset = color_to_reset * 10 + (b - '0');
-                            else
-                                goto try;
-
-                        }
-                        reset_color(COLORS, color_to_reset);
-                        if (end_of_input) break;
-                        last_index = ++char_index;
-                        try:;
-                    }
-                }
-            }
-            break;
-        case 110:
-        case 111:
-        case 112:
-            reset_color(COLORS, (ui8) (COLOR_INDEX_FOREGROUND + value - 110));
             break;
     }
     finish_sequence();
@@ -327,7 +226,7 @@ static void do_line_feed(terminal *restrict const emulator) {
         }
     } else {
         if (new_cursor_row == BOTTOM_MARGIN) {
-            BUFF_OP.scroll_down(emulator, 1);
+            scroll_down(emulator, 1);
             new_cursor_row = BOTTOM_MARGIN - 1;
         }
         CURSOR_ROW = new_cursor_row;
@@ -343,15 +242,15 @@ static void emit_codepoint(terminal *restrict const emulator, ui8 codepoint) {
     if (get(DECSET_BIT, AUTOWRAP)) {
         if (cursor_in_last_column && ABOUT_TO_AUTOWRAP) {
             CURSOR_COL = LEFT_MARGIN;
-            BUFF_OP.set_line_wrap(emulator, CURSOR_ROW, true);
+            set_line_wrap(emulator, CURSOR_ROW, true);
             if (CURSOR_ROW + 1 < BOTTOM_MARGIN)CURSOR_ROW++;
-            else BUFF_OP.scroll_down(emulator, 1);
+            else scroll_down(emulator, 1);
         }
     }
     if (MODE_INSERT)
         block_copy_emu(CURSOR_COL, CURSOR_ROW, RIGHT_MARGIN - dest_col, 1, dest_col, CURSOR_ROW);
     CURSOR_GLYPH.code = codepoint;
-    BUFF_OP.set_glyph(emulator);
+    set_glyph(emulator);
 
     if (get(DECSET_BIT, AUTOWRAP))
         SET_ABOUT_TO_AUTOWRAP_VAL(cursor_in_last_column);
@@ -481,9 +380,8 @@ static void do_dec_set_or_reset(terminal *restrict const emulator, const bool se
         case 47:
         case 1047:
         case 1049: {
-            void *new_screen = setting ? ALT_BUFF : MAIN_BUFF;
-            if (new_screen != SCREEN_BUFF) {
-                SCREEN_BUFF = new_screen;
+            if ((is_alt_buff_active() != 0) != setting) {
+                switch_buffers(emulator);
                 if (setting) {
                     save_cursor(emulator);
                     block_clear(0, 0, COLUMNS, ROWS);
@@ -532,34 +430,15 @@ static void inline select_graphic_radiation(terminal *restrict const emulator) {
             case 48: {
                 const i8 first_arg = (i8) CSI_ARG[i + 1];
                 if (i + 2 > CSI_INDEX) continue;
-                switch (first_arg) {
-                    // true color is not supported by default
-//                    case 2:
-//                        if (i + 4 <= CSI_INDEX) {
-//                            const color c = {.r=(ui8) CSI_ARG[i + 2], .g=(ui8) CSI_ARG[i + 3], .b=(ui8) CSI_ARG[i + 4]};
-//                            if (code == 38) {
-//                                CURSOR_STYLE.fg.color = c;
-//                                set(CURSOR_STYLE.effect, TRUE_COLOR_FG);
-//                            } else {
-//                                CURSOR_STYLE.bg.color = c;
-//                                set(CURSOR_STYLE.effect, TRUE_COLOR_BG);
-//                            }
-//
-//                            i += 4;
-//                        }
-//                        break;
-                    case 5: {
-                        int16_t color = CSI_ARG[i + 2];
-                        i += 2;
-                        if (BETWEEN(color, 0, NUM_INDEXED_COLORS)) {
-                            (code == 38) ? (CURSOR_STYLE.fg = (ui8) color)
-                                         : (CURSOR_STYLE.bg = (ui8) color);
-                        }
+                if (first_arg == 5) {
+                    int16_t color = CSI_ARG[i + 2];
+                    i += 2;
+                    if (BETWEEN(color, 0, NUM_INDEXED_COLORS)) {
+                        (code == 38) ? (CURSOR_STYLE.fg = (ui8) color)
+                                     : (CURSOR_STYLE.bg = (ui8) color);
                     }
-                        break;
-                    default:
-                        finish_sequence();
-                }
+                } else
+                    finish_sequence();
             }
                 break;
             case 39:
@@ -616,7 +495,7 @@ static inline void do_esc(terminal *restrict const emulator, const ui8 codepoint
             break;
         case 'c':
             reset_emulator(emulator);
-            BUFF_OP.clear_transcript(emulator);
+            clear_transcript(emulator);
             block_clear(0, 0, COLUMNS, ROWS);
             set_cursor_position_origin_mode(emulator, 0, 0);
             break;
@@ -755,7 +634,7 @@ static inline void do_esc_csi(terminal *restrict const emulator, const ui8 codep
                 block_clear(0, 0, COLUMNS, ROWS);
                     break;
                 case 3:
-                    BUFF_OP.clear_transcript(emulator);
+                    clear_transcript(emulator);
                     break;
                 default:
                     finish_sequence();
@@ -814,7 +693,7 @@ static inline void do_esc_csi(terminal *restrict const emulator, const ui8 codep
         }
             break;
         case 'S':
-            BUFF_OP.scroll_down(emulator, (i8) getArg(emulator, 0, 1, 1));
+            scroll_down(emulator, (i8) getArg(emulator, 0, 1, 1));
             break;
         case 'T':
             if (0 == CSI_INDEX) {
@@ -978,12 +857,12 @@ static inline void do_esc_csi_question_mark(terminal *restrict const emulator, c
             CLEAR_ABOUT_TO_AUTOWRAP;
             switch (arg) {
                 case 0:
-                    BUFF_OP.block_set_attr(emulator, CURSOR_COL, CURSOR_ROW, COLUMNS - CURSOR_COL, (i8) (just_row ? 1 : ROWS - CURSOR_ROW), 0, 1);
+                    block_set_attribute(emulator, CURSOR_COL, CURSOR_ROW, COLUMNS - CURSOR_COL, (i8) (just_row ? 1 : ROWS - CURSOR_ROW), 0, 1);
                     break;
                 case 1:
                 case 2: {
                     const i8 y = (i8) (just_row ? CURSOR_ROW : 0);
-                    BUFF_OP.block_set_attr(emulator, 0, y, CURSOR_COL + 1, (i8) (((just_row || arg == 1) ? CURSOR_ROW + 1 : ROWS) - y), false, true);
+                    block_set_attribute(emulator, 0, y, CURSOR_COL + 1, (i8) (((just_row || arg == 1) ? CURSOR_ROW + 1 : ROWS) - y), false, true);
                 }
                     break;
                 default:
@@ -1068,7 +947,7 @@ static inline void do_esc_csi_dollar(terminal *restrict const emulator, const ui
                 left = MIN(left, effective_right_margin + 1) - 1;
                 h = MIN(h, effective_bottom_margin) - top;
                 w = MIN(w, effective_right_margin) - top;
-                BUFF_OP.block_set_attr(emulator, left, top, w, h, !selective, !keep_attributes);
+                block_set_attribute(emulator, left, top, w, h, !selective, !keep_attributes);
             }
         }
             break;
@@ -1125,8 +1004,8 @@ static inline void do_esc_csi_dollar(terminal *restrict const emulator, const ui
                     }
 
                     if (!reverse || set_or_clear)
-                        BUFF_OP.set_or_clear_effect(emulator, bits, set_or_clear, reverse, top, bottom, left, right, effective_right_margin,
-                                                    effective_left_margin);
+                        set_or_clear_effect(emulator, bits, set_or_clear, reverse, top, bottom, left, right, effective_right_margin,
+                                            effective_left_margin);
 
                 }
             }
@@ -1218,7 +1097,7 @@ static inline void handle_esc_state(terminal *restrict const emulator, const ui8
         case ESC_POUND:
             if ('8' == codepoint) {
                 CURSOR_GLYPH.code = 'E';
-                BUFF_OP.block_set(emulator, 0, 0, COLUMNS, ROWS);
+                block_set(emulator, 0, 0, COLUMNS, ROWS);
             } else
                 finish_sequence();
             break;
@@ -1368,8 +1247,8 @@ static inline void process_codepoint(terminal *restrict const emulator, const ui
         case 8:
             if (LEFT_MARGIN == CURSOR_COL) {
                 const i8 prev_row = CURSOR_ROW - 1;
-                if (0 <= prev_row && BUFF_OP.get_line_wrap(emulator, prev_row)) {
-                    BUFF_OP.set_line_wrap(emulator, prev_row, false);
+                if (0 <= prev_row && get_line_wrap(emulator, prev_row)) {
+                    set_line_wrap(emulator, prev_row, false);
                     set_cursor_row_col(emulator, prev_row, RIGHT_MARGIN - 1);
                 }
             } else {
@@ -1420,6 +1299,7 @@ static inline void process_codepoint(terminal *restrict const emulator, const ui
 terminal *new_terminal(const terminal_session_info *restrict const session_info) {
     const int ptm = open("/dev/ptmx", O_RDWR | O_CLOEXEC);
     struct termios tios;
+    struct winsize sz = {.ws_row=ROWS, .ws_col=COLUMNS};
     char devname[64];
     pid_t pid;
 
@@ -1435,16 +1315,13 @@ terminal *new_terminal(const terminal_session_info *restrict const session_info)
     tcsetattr(ptm, TCSANOW, &tios);
 
 
-    ioctl(ptm, TIOCSWINSZ, &session_info->sz);
+    ioctl(ptm, TIOCSWINSZ, &sz);
 
     pid = fork();
     if (pid > 0) {
         terminal *restrict const emulator = calloc(1, sizeof(terminal));
-        COLUMNS = (i8) session_info->sz.ws_col;
-        ROWS = (i8) session_info->sz.ws_row;
         TAB_STOP = malloc((size_t) CELI(COLUMNS, 8) * sizeof(ui8));
-        BUFF_OP.allocate_buffers(emulator);
-        SCREEN_BUFF = MAIN_BUFF;
+        allocate_buffers(emulator);
         LAST_CODEPOINT = -1;
         reset_emulator(emulator);
         emulator->pid = pid;
@@ -1526,6 +1403,6 @@ void send_mouse_event(const terminal *restrict const emulator, i8 mouse_button, 
 
 void destroy_term_emulator(terminal *const emulator) {
     close(FD);
-    BUFF_OP.free_buffers(emulator);
+    free_buffers(emulator);
     free(emulator);
 }

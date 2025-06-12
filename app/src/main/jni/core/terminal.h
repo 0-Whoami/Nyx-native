@@ -77,24 +77,20 @@ typedef struct {
 typedef struct {
     int fd;
     pid_t pid;
-    vec3 *colors;
     term_cursor cursor, saved_state, saved_state_alt;
-    void *main, *alt, *screen_buff;
+    void *main, buffers;
     ui8 *tabStop;
     char last_codepoint;
     i8 leftMargin, rightMargin, topMargin, bottomMargin;
-    i8 rows, columns;
     char osc_args[MAX_OSC_STRING_LENGTH + 4];
     int16_t osc_len;
     short csi_args[MAX_ESCAPE_PARAMETERS];
     ui8 esc_state; //MSB is do_not_continue_sequence and 5 lsb is state
     i8 csi_index;
-    u_short aShort; //1st msb is abt to autowrap 2nd msb is mode_insert 13 lsb are saved decset
-    void *ptr;
+    u_short aShort; //1st msb is abt to autowrap 2nd msb is mode_insert and 3rd msb is alt buff 13 lsb are saved decset
 } terminal;
 
 typedef struct {
-    struct winsize sz;
     char *const cmd;
     char *const cwd;
     char *const *const env;
@@ -103,6 +99,7 @@ typedef struct {
 } terminal_session_info;
 
 extern const Glyph NORMAL;
+extern const i8 ROWS = 32, COLUMNS = 64;
 
 terminal *new_terminal(const terminal_session_info *restrict);
 

@@ -12,14 +12,6 @@ typedef int_fast8_t i8;
 typedef uint_fast8_t ui8;
 
 typedef struct {
-    float x, y;
-} vec2;
-
-typedef struct {
-    float r, g, b;
-} vec3;
-
-typedef struct {
     ui8 effect, bg, fg;
 } glyph_style;
 

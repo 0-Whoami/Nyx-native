@@ -4,6 +4,9 @@
     <uses-feature
         android:name="android.hardware.type.watch"
         android:required="true" />
+    <uses-feature
+        android:glEsVersion="0x00030000"
+        android:required="true" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -32,8 +35,9 @@
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
-        <meta-data android:name="com.android.graphics.injectLayers.enable"
-            android:value="true"/>
+        <meta-data
+            android:name="com.android.graphics.injectLayers.enable"
+            android:value="true" />
     </application>
 
 </manifest>

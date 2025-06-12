@@ -1,54 +1,48 @@
 package com.termux;
 
+import static android.view.View.TEXT_ALIGNMENT_GRAVITY;
+
 import android.app.Activity;
-import android.app.NativeActivity;
-import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.opengl.GLSurfaceView;
+import android.opengl.GLUtils;
 import android.os.Bundle;
-import android.util.Log;
-import android.view.Surface;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
-import android.view.View;
-import android.widget.ImageView;
+import android.text.SpannableString;
+import android.text.style.UnderlineSpan;
+import android.view.Gravity;
 import android.widget.TextView;
 
-public class MainActivity extends Activity implements SurfaceHolder.Callback2 {
+import javax.microedition.khronos.egl.EGLConfig;
+import javax.microedition.khronos.opengles.GL10;
+
+public class MainActivity extends Activity implements GLSurfaceView.Renderer {
     static {
         System.loadLibrary("termux");
     }
 
-    static native void init(Surface surface, AssetManager assetManager);
+    static native void init();
+
+    static native void render();
 
     static native void destroy();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().takeSurface(this);
-//        TextView textView = new TextView(this);
-//        setContentView(textView);
-//        textView.setTextColor(Color.WHITE);
-//        textView.setText("H␋el␉lo\rW␌o\nrl␊d");
-//        SurfaceView surfaceView = new SurfaceView(this);
-//        setContentView(surfaceView);
-//        surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
-//            @Override
-//            public void surfaceCreated(SurfaceHolder holder) {
-//                init(holder.getSurface(), getAssets(),null );
-//            }
-//
-//            @Override
-//            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-//
-//            }
-//
-//            @Override
-//            public void surfaceDestroyed(SurfaceHolder holder) {
-//
-//            }
-//        });
+        GLSurfaceView view = new GLSurfaceView(this);
+        view.setEGLContextClientVersion(3);
+        view.setRenderer(this);
+        TextView tv = new TextView(this);
+        tv.setGravity(Gravity.CENTER);
+        tv.setTextAlignment(TEXT_ALIGNMENT_GRAVITY);
+        SpannableString string = new SpannableString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijlklmnopqrstuvwxyz01234567890");
+        string.setSpan(new UnderlineSpan(), 0, string.length(), 0);
+        tv.setText(string);
+        tv.setTextColor(Color.WHITE);
+        tv.setTypeface(Typeface.MONOSPACE);
+        setContentView(tv);
     }
 
     @Override
@@ -58,23 +52,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback2 {
     }
 
     @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-
-        init(holder.getSurface(), getAssets());
+    public void onDrawFrame(GL10 gl) {
+        render();
     }
 
     @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
+    public void onSurfaceChanged(GL10 gl, int width, int height) {
 
     }
 
     @Override
-    public void surfaceRedrawNeeded(SurfaceHolder holder) {
-
+    public void onSurfaceCreated(GL10 gl, EGLConfig config) {
+        init();
     }
 }
