@@ -10,7 +10,7 @@ precision mediump float;
 layout(location=0)in int packed_data;
 
 uniform vec3 mod;
-// Output to fragment shader
+
 out vec2 uv;
 out vec3 fg;
 out vec3 bg;
